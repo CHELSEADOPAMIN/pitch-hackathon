@@ -1,0 +1,27 @@
+{
+  "name": "pinch-voice-shopping",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:mobile": "npm run start --workspace @pinch-voice/mobile",
+    "dev:server": "npm run dev --workspace @pinch-voice/server",
+    "android": "npm run android --workspace @pinch-voice/mobile",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:push": "npm run db:push --workspace @pinch-voice/server",
+    "db:seed": "npm run db:seed --workspace @pinch-voice/server"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}
