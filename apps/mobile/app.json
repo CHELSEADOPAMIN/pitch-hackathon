@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "Pinch Voice Shop",
+    "owner": "crokily",
     "slug": "pinch-voice-shop",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -55,6 +56,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7c40a4f4-aeb1-4248-a9de-39ebdb384606"
+      }
     }
   }
 }

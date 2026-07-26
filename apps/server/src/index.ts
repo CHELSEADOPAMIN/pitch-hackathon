@@ -39,7 +39,11 @@ const app = createApp({
   realtime,
   pinchHealth: () => pinch.health(),
 });
-const server = serve({ fetch: app.fetch, port: config.port });
+const server = serve({
+  fetch: app.fetch,
+  hostname: config.hostname,
+  port: config.port,
+});
 
 const shutdown = () => {
   server.close(() => {

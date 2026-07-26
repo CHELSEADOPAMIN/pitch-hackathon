@@ -30,6 +30,7 @@ const environmentSchema = z.object({
   OPENAI_REALTIME_MODEL: z.string().min(1).default("gpt-realtime-2.1"),
   OPENAI_VISION_MODEL: z.string().min(1).default("gpt-5.6-terra"),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+  HOST: z.string().trim().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
 });
 
@@ -43,6 +44,7 @@ export type ServerConfig = {
   openAiRealtimeModel: string;
   openAiVisionModel: string;
   databaseUrl: string;
+  hostname: string;
   port: number;
 };
 
@@ -70,6 +72,7 @@ export const parseServerConfig = (
     openAiRealtimeModel: value.OPENAI_REALTIME_MODEL,
     openAiVisionModel: value.OPENAI_VISION_MODEL,
     databaseUrl: value.DATABASE_URL,
+    hostname: value.HOST,
     port: value.PORT,
   };
 };
