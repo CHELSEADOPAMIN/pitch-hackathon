@@ -62,22 +62,40 @@ cd /home/ubuntu/work/aisho/pitch-hackathon/apps/mobile
 
 `preview` 是独立包，不依赖 USB、Expo Go 或本机 Metro。
 
-## 已知阻塞：Android 启动白屏
+## 已知阻塞：Android 卡在 `RESTORING SESSION`
 
-首个 EAS preview APK 能安装并启动 Activity，但 React 根实例没有完成初始化，
-界面保持白屏。白屏后按实体键会命中 React Native
-`ReactActivityDelegate.onKeyDown`，其中 `mReactDelegate` 仍为 `null`。
+EAS preview APK 已在此前未安装过本应用的另一台 Android 手机上验证：APK 可以
+正常安装、启动并渲染 React 界面，但首屏持续显示 `RESTORING SESSION`。
+先前的白屏来自安装异常，不再作为应用启动故障的证据。
 
-当前证据指向原移动端依赖/启动链，而非上述部署配置：
+该画面发生在任何后端、Pinch 或 OpenAI 请求之前。`HomeScreen` 仅在本地
+Zustand persist 从 AsyncStorage 恢复完成后才进入登录页：
 
-1. Expo SDK 57 强制使用 New Architecture。
-2. `expo-doctor` 唯一失败项是 `react-native-webrtc` 未验证 New Architecture。
-3. 首屏入口存在以下静态导入链，登录页出现前就会加载 WebRTC 原生模块：
+```text
+session-store.ts 创建 store 并自动开始异步 hydration
+  -> useStoreHydrated() 首次读取 hasHydrated()
+  -> React effect 注册 onFinishHydration()
+  -> hydration 完成后进入 LoginScreen
+```
 
-   ```text
-   CustomerScreen -> useRealtimeShopping -> realtime-session -> react-native-webrtc
-   ```
+当前 `useStoreHydrated()` 存在事件竞态：如果 AsyncStorage 在首次读取
+`hasHydrated() === false` 之后、effect 注册完成监听之前完成 hydration，
+完成事件会被错过，组件内的 `hydrated` 将永久保持 `false`。全新安装时存储为空，
+读取可能很快完成，因此同样可能触发；这不是旧 session 或重装残留导致的。
 
-后续应先采集应用冷启动阶段的完整 `adb logcat`，再由移动端作者验证
-`react-native-webrtc@124.0.8` 与 Expo SDK 57 / React Native 0.86 的兼容性，
-或将 WebRTC 延迟加载以隔离根因。本交接不包含白屏修复。
+另一个永久等待分支是 AsyncStorage 读取或 JSON 解析失败。当前启动状态没有
+hydration error、超时或重试出口，所以失败时仍只显示旋转状态。
+
+已排除的方向：
+
+- APK 包含 AsyncStorage 原生模块，不是 EAS 漏打包。
+- `aisho-pinch.service`、Nginx 和公网 HTTPS 均正常。
+- `https://aisho.claw.a2a.ing/health` 返回
+  `{"status":"ok","pinch":"ok"}`。
+- `8787` 继续只监听 `127.0.0.1`；无需在 Oracle 入站规则中开放。
+- 本 PR 没有修改 session store、hydration hook 或首屏状态机。
+
+建议由移动端作者在注册 hydration listeners 后立即重新读取一次
+`hasHydrated()` 以补偿已完成事件，并增加 hydration error/重试状态；也可以使用
+`skipHydration` 后在组件挂载时显式调用 `rehydrate()`。本交接只记录问题，不修改
+原移动端实现。
