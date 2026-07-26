@@ -147,6 +147,38 @@ export const DEMO_PRODUCTS = [
     priceCents: 400,
     description: 'White bread loaf in a blue and red plastic bag',
   },
+  {
+    id: 'product_cripps_shortbread',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Cripps Premium Tasmanian Shortbread 200g',
+    priceCents: 550,
+    description:
+      'Long white and grey box with a Tasmanian coastal photo, gold Shortbread script and Cripps logo',
+  },
+  {
+    id: 'product_pureau_water',
+    merchantId: DEMO_MERCHANT.id,
+    name: "Pureau Australia's Purest Water 2L",
+    priceCents: 250,
+    description:
+      'Large clear 2 litre water bottle with a pale blue label and bright blue Pureau wordmark',
+  },
+  {
+    id: 'product_nice_natural_trail_mix',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Nice & Natural Roasted Nut Bars Trail Mix 6 Pack 192g',
+    priceCents: 500,
+    description:
+      'Red box containing six roasted nut trail mix bars with Nice & Natural branding',
+  },
+  {
+    id: 'product_pistachio_papi',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Pistachio Papi Crunchy Pistachio Spread 180g',
+    priceCents: 1400,
+    description:
+      '180g glass jar with a black lid and a white and green illustrated Pistachio Papi crunchy spread label',
+  },
 ] as const;
 
 export async function seedDatabase(db: Database) {
