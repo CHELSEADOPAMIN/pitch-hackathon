@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { subscribeToStoreHydration } from "@/hooks/store-hydration";
 import { useSessionStore } from "@/store/session-store";
 
 export function useStoreHydrated() {
@@ -7,18 +8,10 @@ export function useStoreHydrated() {
     useSessionStore.persist.hasHydrated(),
   );
 
-  useEffect(() => {
-    const unsubscribeStart = useSessionStore.persist.onHydrate(() =>
-      setHydrated(false),
-    );
-    const unsubscribeFinish = useSessionStore.persist.onFinishHydration(() =>
-      setHydrated(true),
-    );
-    return () => {
-      unsubscribeStart();
-      unsubscribeFinish();
-    };
-  }, []);
+  useEffect(
+    () => subscribeToStoreHydration(useSessionStore.persist, setHydrated),
+    [],
+  );
 
   return hydrated;
 }
