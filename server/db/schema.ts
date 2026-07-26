@@ -2,7 +2,7 @@ import {
   check,
   integer,
   jsonb,
-  pgTable,
+  pgSchema,
   text,
   timestamp,
   uniqueIndex,
@@ -12,12 +12,14 @@ import { randomUUID } from 'node:crypto';
 
 import type { CartItem } from '../domain/types';
 
-export const merchants = pgTable('merchants', {
+export const databaseSchema = pgSchema('codex_voice');
+
+export const merchants = databaseSchema.table('merchants', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
 });
 
-export const users = pgTable(
+export const users = databaseSchema.table(
   'users',
   {
     id: text('id')
@@ -30,7 +32,7 @@ export const users = pgTable(
   (table) => [uniqueIndex('users_username_unique').on(table.username)],
 );
 
-export const products = pgTable(
+export const products = databaseSchema.table(
   'products',
   {
     id: text('id').primaryKey(),
@@ -46,14 +48,14 @@ export const products = pgTable(
   ],
 );
 
-export const carts = pgTable('carts', {
+export const carts = databaseSchema.table('carts', {
   userId: text('user_id')
     .primaryKey()
     .references(() => users.id),
   items: jsonb('items').$type<CartItem[]>().notNull().default([]),
 });
 
-export const orders = pgTable(
+export const orders = databaseSchema.table(
   'orders',
   {
     id: text('id')

@@ -24,7 +24,7 @@ describeDatabase('Supabase schema and seed', () => {
     const rows = await sql<{ table_name: string }[]>`
       select table_name
       from information_schema.tables
-      where table_schema = 'public'
+      where table_schema = 'codex_voice'
         and table_name in ('users', 'products', 'carts', 'orders', 'merchants')
       order by table_name
     `;
@@ -42,7 +42,7 @@ describeDatabase('Supabase schema and seed', () => {
     const rows = await sql<{ indexname: string }[]>`
       select indexname
       from pg_indexes
-      where schemaname = 'public'
+      where schemaname = 'codex_voice'
         and indexname in (
           'users_username_unique',
           'orders_checkout_quote_unique'
@@ -58,7 +58,7 @@ describeDatabase('Supabase schema and seed', () => {
 
   it('has 5–10 seeded products with integer-cent prices', async () => {
     const products = await sql<{ price_cents: number }[]>`
-      select price_cents from products
+      select price_cents from codex_voice.products
     `;
 
     expect(products.length).toBeGreaterThanOrEqual(5);
