@@ -16,7 +16,7 @@ export default defineConfig({
   dbCredentials: {
     url: migrationUrl.toString(),
   },
-  schemaFilter: ['public'],
+  schemaFilter: ['codex_voice'],
   tablesFilter: ['users', 'products', 'carts', 'orders', 'merchants'],
   strict: true,
   verbose: true,

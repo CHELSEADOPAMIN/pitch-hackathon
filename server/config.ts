@@ -10,6 +10,8 @@ const serverConfigSchema = z.object({
     .url()
     .default('https://api.getpinch.com.au/test'),
   PINCH_API_VERSION: z.string().default('2020.1'),
+  HOST: z.string().min(1).default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
 });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;

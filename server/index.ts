@@ -40,20 +40,24 @@ export function createServer(environment: NodeJS.ProcessEnv = process.env) {
   return {
     app,
     close: database.close,
+    host: config.HOST,
+    port: config.PORT,
   };
 }
 
 export type { AppType } from './app';
 
 const server = createServer();
-const port = 8787;
 const httpServer = serve(
   {
     fetch: server.app.fetch,
-    port,
+    hostname: server.host,
+    port: server.port,
   },
   ({ port: listeningPort }) => {
-    console.log(`Pinch Voice API listening on http://0.0.0.0:${listeningPort}`);
+    console.log(
+      `Pinch Voice API listening on http://${server.host}:${listeningPort}`,
+    );
   },
 );
 

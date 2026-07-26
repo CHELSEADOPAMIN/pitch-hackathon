@@ -1,15 +1,15 @@
 /** @type {import('expo/config').ExpoConfig} */
 const config = {
-  name: 'Pinch Voice',
-  slug: 'pinch-voice-shopping',
-  owner: 'chelsea_yang',
+  name: 'Pinch Voice Codex',
+  slug: 'pinch-voice-shopping-codex',
+  owner: 'crokily',
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
-  scheme: 'pinchvoice',
+  scheme: 'pinchvoicecodex',
   userInterfaceStyle: 'light',
   android: {
-    package: 'com.konstruq.pinchvoiceshopping',
+    package: 'au.com.crokily.pinchvoice.codex',
     permissions: ['CAMERA', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
     adaptiveIcon: {
       backgroundColor: '#F4F0E6',
@@ -56,7 +56,7 @@ const config = {
       process.env.EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY ??
       process.env.PINCH_PUBLISHABLE_KEY,
     eas: {
-      projectId: '365da739-7c8b-49a2-9ea2-db9842d59a25',
+      projectId: '33b4ba14-80ff-4d92-a16a-9c6bf18d70e1',
     },
   },
 };
