@@ -1,17 +1,18 @@
 import { Pressable, Text } from 'react-native';
 
+import { demoControlsEnabled } from '@/lib/runtime-config';
 import { useSessionStore } from '@/state/session-store';
 
 export function DevRoleSwitch({
   inverse = false,
-  target = '店员',
+  target = 'Merchant',
 }: {
   inverse?: boolean;
-  target?: '顾客' | '店员';
+  target?: 'Shopper' | 'Merchant';
 }) {
   const switchRole = useSessionStore((state) => state.switchRole);
 
-  if (!__DEV__) {
+  if (!demoControlsEnabled()) {
     return null;
   }
 
@@ -26,7 +27,7 @@ export function DevRoleSwitch({
       <Text
         className={`font-medium text-xs ${inverse ? 'text-paper' : 'text-ink'}`}
       >
-        切到{target}端
+        {target} view
       </Text>
     </Pressable>
   );

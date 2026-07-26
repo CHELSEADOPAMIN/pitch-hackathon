@@ -16,6 +16,38 @@ const USER: User = {
 };
 
 describe('Hono API contracts', () => {
+  it('checks database and Pinch health', async () => {
+    const dependencies = createDependencies();
+    const response = await createApp(dependencies).request('/api/health');
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      status: 'ok',
+      dependencies: { database: 'ok', pinch: 'ok' },
+    });
+  });
+
+  it('returns 503 when a health dependency is unavailable', async () => {
+    const dependencies = createDependencies();
+    dependencies.health.pinch.mockRejectedValueOnce(
+      new Error('temporary outage'),
+    );
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    const response = await createApp(dependencies).request('/api/health');
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      status: 'degraded',
+      dependencies: { database: 'ok', pinch: 'unavailable' },
+    });
+    consoleError.mockRestore();
+  });
+
   it('rejects malformed login input before touching Pinch', async () => {
     const dependencies = createDependencies();
     const response = await createApp(dependencies).request('/api/login', {
@@ -171,6 +203,10 @@ function createDependencies(options: { user?: User } = {}) {
   return {
     repository,
     pinch,
+    health: {
+      database: vi.fn(async () => undefined),
+      pinch: vi.fn(async () => undefined),
+    },
     realtime: {
       createClientSecret: vi.fn(async () => ({
         value: 'ek_test',

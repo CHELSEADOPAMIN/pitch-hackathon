@@ -67,6 +67,10 @@ export class PinchClient implements PinchGateway {
     this.now = options.now ?? Date.now;
   }
 
+  async healthCheck(): Promise<void> {
+    await this.getAccessToken();
+  }
+
   async createPayer(username: string) {
     const response = await this.request('payers', {
       method: 'POST',

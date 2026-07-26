@@ -46,28 +46,35 @@ export class CheckoutService {
       }
 
       claimedQuoteId = claim.quote.id;
-      const payment = await this.payments.charge({
-        payerId: user.pinchPayerId,
-        sourceId: user.pinchSourceId,
-        amountCents: claim.quote.totalCents,
-        description: `Checkout ${claim.quote.id}`,
-        nonce: `checkout-${claim.quote.id}`,
-      });
+      let paidResult: Extract<AgentResult, { status: 'paid' }>;
+      if (claim.kind === 'approved') {
+        paymentApproved = true;
+        paidResult = claim.result;
+      } else {
+        const payment = await this.payments.charge({
+          payerId: user.pinchPayerId,
+          sourceId: user.pinchSourceId,
+          amountCents: claim.quote.totalCents,
+          description: `Checkout ${claim.quote.id}`,
+          nonce: `checkout-${claim.quote.id}`,
+        });
 
-      if (payment.status !== 'approved') {
-        this.quotes.release(claim.quote.id);
-        return {
-          status: 'error',
-          reason: `payment_${payment.status}`,
+        if (payment.status !== 'approved') {
+          this.quotes.release(claim.quote.id);
+          return {
+            status: 'error',
+            reason: paymentFailureReason(payment.status),
+          };
+        }
+        paymentApproved = true;
+
+        paidResult = {
+          status: 'paid',
+          paymentId: payment.id,
+          totalCents: claim.quote.totalCents,
         };
+        this.quotes.markApproved(claim.quote.id, paidResult);
       }
-      paymentApproved = true;
-
-      const paidResult: Extract<AgentResult, { status: 'paid' }> = {
-        status: 'paid',
-        paymentId: payment.id,
-        totalCents: claim.quote.totalCents,
-      };
 
       await this.repository.createOrder({
         userId,
@@ -76,17 +83,31 @@ export class CheckoutService {
         totalCents: claim.quote.totalCents,
         status: 'paid',
         checkoutQuoteId: claim.quote.id,
-        pinchPaymentId: payment.id,
+        pinchPaymentId: paidResult.paymentId,
       });
+      await this.repository.clearCart?.(userId);
       this.quotes.markPaid(claim.quote.id, paidResult);
       return paidResult;
     } catch (error) {
-      // If Pinch has approved, keep the quote processing rather than risk a
-      // second charge. The PoC deliberately has no durable recovery workflow.
       if (claimedQuoteId && !paymentApproved) {
         this.quotes.release(claimedQuoteId);
       }
       return errorResult(error);
     }
   }
+}
+
+function paymentFailureReason(status: string) {
+  if (status === 'declined' || status === 'dishonoured') {
+    return `payment_${status}`;
+  }
+  if (
+    status === 'pending' ||
+    status === 'pending-action' ||
+    status === 'processing' ||
+    status === 'scheduled'
+  ) {
+    return 'payment_pending';
+  }
+  return 'payment_not_approved';
 }

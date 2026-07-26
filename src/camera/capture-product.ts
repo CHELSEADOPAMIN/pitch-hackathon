@@ -9,7 +9,7 @@ export async function captureProduct(
   ready: boolean,
 ) {
   if (!cameraRef.current || !ready) {
-    throw new Error('相机尚未就绪');
+    throw new Error('The camera is not ready yet.');
   }
 
   const photo = await cameraRef.current.takePictureAsync({
@@ -26,7 +26,7 @@ export async function captureProduct(
   });
 
   if (!result.base64) {
-    throw new Error('照片处理失败');
+    throw new Error('The product photo could not be processed.');
   }
   return result.base64;
 }

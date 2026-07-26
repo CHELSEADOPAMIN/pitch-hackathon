@@ -40,7 +40,7 @@ describe('shared API contracts', () => {
     expect(
       agentRequestSchema.parse({
         userId: 'user_1',
-        request: '用户明确确认报价 q_1',
+        request: 'The customer explicitly confirmed quote q_1',
         checkoutConfirmation: { quoteId: 'q_1', confirmed: true },
       }),
     ).toMatchObject({ checkoutConfirmation: { confirmed: true } });

@@ -133,7 +133,8 @@ export function createShoppingAgentRunner(
         },
       }),
       remove_from_cart: tool({
-        description: 'Remove a known product completely from the cart.',
+        description:
+          'Remove a known product completely from the cart. Use this for negative intent such as “I do not want the milk anymore”, “take the water out”, “remove this”, or “I changed my mind about the chips”.',
         inputSchema: z.object({
           productId: z.string(),
         }),
@@ -236,7 +237,9 @@ Rules:
 - Product IDs must come from this catalogue, and authoritative names and prices must come from database tools.
 - Never infer a price from an image or label.
 - For adding a clearly identified product, call add_to_cart.
-- For removals, cart reads and checkout, use their corresponding tools.
+- Negative intent such as "I don't want X anymore", "take X out", "remove X", or "not X" is always a removal, never an add.
+- For a removal, map the named item to the catalogue and call remove_from_cart. If the cart reference is unclear, call get_cart first, then remove only the item the customer identified.
+- For cart reads and checkout, use their corresponding tools.
 - If two or more catalogue products are plausible, do not guess: call report_ambiguity with only those candidate IDs.
 - If no catalogue item matches, call search_products once with the best factual description. Its no-match error is the final result.
 - A checkout request without explicit quote confirmation must only call prepare_checkout.

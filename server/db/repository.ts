@@ -26,6 +26,7 @@ export interface ShoppingRepository {
     userId: string,
     productId: string,
   ): Promise<{ removed: CartItem; cart: CartItem[] }>;
+  clearCart?(userId: string): Promise<void>;
   createOrder(input: CreateOrderInput): Promise<Order>;
   listOrders(username?: string): Promise<Order[]>;
 }
@@ -157,10 +158,37 @@ export class DrizzleShoppingRepository implements ShoppingRepository {
     return { removed, cart: next };
   }
 
+  async clearCart(userId: string): Promise<void> {
+    await this.db
+      .insert(carts)
+      .values({ userId, items: [] })
+      .onConflictDoUpdate({
+        target: carts.userId,
+        set: { items: [] },
+      });
+  }
+
   async createOrder(input: CreateOrderInput): Promise<Order> {
-    const [order] = await this.db.insert(orders).values(input).returning();
-    if (!order) throw new DomainError('order_create_failed');
-    return order;
+    const [created] = await this.db
+      .insert(orders)
+      .values(input)
+      .onConflictDoNothing({ target: orders.checkoutQuoteId })
+      .returning();
+    if (created) return created;
+
+    const [existing] = await this.db
+      .select()
+      .from(orders)
+      .where(eq(orders.checkoutQuoteId, input.checkoutQuoteId))
+      .limit(1);
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.pinchPaymentId !== input.pinchPaymentId
+    ) {
+      throw new DomainError('order_create_failed');
+    }
+    return existing;
   }
 
   async listOrders(username?: string): Promise<Order[]> {

@@ -1,4 +1,5 @@
 import type { AgentResult } from '@/contracts/api';
+import { z } from 'zod';
 
 export type RealtimeFunctionCall = {
   type: 'function_call';
@@ -15,6 +16,38 @@ type RealtimeResponseDone = {
     output?: unknown[];
   };
 };
+
+const realtimeEventSchema = z
+  .object({
+    type: z.string().optional(),
+    response: z
+      .object({
+        status: z.string().optional(),
+        output: z.array(z.unknown()).optional(),
+      })
+      .passthrough()
+      .optional(),
+    error: z
+      .object({
+        message: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type ParsedRealtimeEvent = z.infer<typeof realtimeEventSchema>;
+
+export function parseRealtimeEvent(raw: unknown): ParsedRealtimeEvent | null {
+  if (typeof raw !== 'string') return null;
+
+  try {
+    const result = realtimeEventSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export function completedShoppingCalls(
   event: RealtimeResponseDone,
@@ -55,6 +88,7 @@ export function functionCallOutputEvents(callId: string, result: AgentResult) {
 export const initialGreetingEvent = {
   type: 'response.create',
   response: {
-    instructions: '用一句很短、自然的中文问候顾客，并询问想买什么。',
+    instructions:
+      'Greet the customer in one short, natural English sentence and ask what they would like to shop for.',
   },
 } as const;

@@ -7,11 +7,13 @@ import { BrandMark } from '@/components/brand-mark';
 import { ScreenShell } from '@/components/screen-shell';
 import { loginRequestSchema, loginResponseSchema } from '@/contracts/api';
 import { api, readJson } from '@/lib/api';
+import { demoControlsEnabled } from '@/lib/runtime-config';
 import { useSessionStore } from '@/state/session-store';
 
 export function LoginScreen() {
   const [username, setUsername] = useState('');
   const setSession = useSessionStore((state) => state.setSession);
+  const setRole = useSessionStore((state) => state.setRole);
 
   const login = useMutation({
     mutationFn: async () => {
@@ -36,17 +38,18 @@ export function LoginScreen() {
         <View className="gap-7">
           <View className="gap-3">
             <Text className="font-display text-[58px] leading-[55px] text-ink">
-              说一声，
-              {'\n'}就买好了。
+              See it.
+              {'\n'}Say it. Shop.
             </Text>
             <Text className="max-w-[310px] font-sans text-base leading-6 text-ink/60">
-              先告诉我们你的名字。离店时，店员会用它核对你的订单。
+              Tell us your name first. A merchant can use it to find your paid
+              order when you leave.
             </Text>
           </View>
 
           <View className="gap-3">
             <Text className="ml-5 font-medium text-[11px] uppercase tracking-[2px] text-ink/45">
-              你的用户名
+              Your name
             </Text>
             <TextInput
               autoCapitalize="none"
@@ -54,7 +57,7 @@ export function LoginScreen() {
               maxLength={40}
               onChangeText={setUsername}
               onSubmitEditing={() => login.mutate()}
-              placeholder="例如 Chelsea"
+              placeholder="For example, Chelsea"
               placeholderTextColor="#8D8B82"
               returnKeyType="go"
               value={username}
@@ -67,18 +70,25 @@ export function LoginScreen() {
             ) : null}
           </View>
 
-          <ActionButton
-            busy={login.isPending}
-            disabled={username.trim().length < 2}
-            onPress={() => login.mutate()}
-          >
-            进入商店
-          </ActionButton>
+          <View className="gap-3">
+            <ActionButton
+              busy={login.isPending}
+              disabled={username.trim().length < 2}
+              onPress={() => login.mutate()}
+            >
+              Enter the store
+            </ActionButton>
+            {demoControlsEnabled() ? (
+              <ActionButton onPress={() => setRole('staff')} tone="light">
+                Open merchant dashboard
+              </ActionButton>
+            ) : null}
+          </View>
         </View>
 
         <View className="self-start">
           <Text className="font-sans text-xs leading-5 text-ink/40">
-            Hackathon demo · 无密码登录
+            Hackathon demo · No password required
           </Text>
         </View>
       </KeyboardAvoidingView>

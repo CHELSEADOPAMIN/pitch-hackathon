@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   ScrollView,
+  Pressable,
   Text,
   TextInput,
   View,
@@ -18,7 +19,11 @@ import {
   paymentSourceResponseSchema,
 } from '@/contracts/api';
 import { api, readJson } from '@/lib/api';
-import { getPinchPublishableKey } from '@/lib/runtime-config';
+import { formatCardNumber, prepareCardDetails } from '@/lib/card-details';
+import {
+  demoControlsEnabled,
+  getPinchPublishableKey,
+} from '@/lib/runtime-config';
 import { useSessionStore } from '@/state/session-store';
 
 const tokenResponseSchema = z.object({
@@ -70,9 +75,21 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
   const setPaymentMethodBound = useSessionStore(
     (state) => state.setPaymentMethodBound,
   );
+  const logout = useSessionStore((state) => state.logout);
 
   const bindCard = useMutation({
     mutationFn: async () => {
+      const prepared = prepareCardDetails({
+        cardNumber,
+        expiryMonth,
+        expiryYear,
+        cvc,
+        cardHolderName,
+      });
+      if (!prepared.ok) {
+        throw new Error(prepared.message);
+      }
+
       const tokenResponse = await fetch(
         'https://api.getpinch.com.au/test/tokens',
         {
@@ -83,19 +100,14 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
           },
           body: JSON.stringify({
             publishableKey: getPinchPublishableKey(),
-            sourceType: 'credit-card',
-            cardNumber: cardNumber.replace(/\s/g, ''),
-            expiryMonth,
-            expiryYear,
-            cvc,
-            cardHolderName,
+            ...prepared.value,
           }),
         },
       );
 
-      const rawToken: unknown = await tokenResponse.json();
+      const rawToken: unknown = await readResponseBody(tokenResponse);
       if (!tokenResponse.ok) {
-        throw new Error(`Pinch 绑卡失败 (${tokenResponse.status})`);
+        throw new Error(pinchCardError(rawToken, tokenResponse.status));
       }
       const { token } = tokenResponseSchema.parse(rawToken);
 
@@ -114,8 +126,8 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
   });
 
   const complete =
-    cardNumber.replace(/\s/g, '').length >= 15 &&
-    expiryMonth.length === 2 &&
+    cardNumber.replace(/\D/g, '').length >= 13 &&
+    expiryMonth.length >= 1 &&
     expiryYear.length === 4 &&
     cvc.length >= 3 &&
     cardHolderName.trim().length > 0;
@@ -138,11 +150,12 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
           <View className="my-10 gap-8">
             <View className="gap-3">
               <Text className="font-display text-[52px] leading-[50px] text-paper">
-                绑定一次，
-                {'\n'}之后只用说话。
+                Save once.
+                {'\n'}Then just talk.
               </Text>
               <Text className="font-sans text-sm leading-6 text-paper/55">
-                卡片信息由你的手机直接发送给 Pinch，不会经过我们的服务器。
+                Card details go directly from this phone to Pinch. They never
+                pass through our server.
               </Text>
             </View>
 
@@ -155,9 +168,9 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
               </View>
 
               <CardField
-                label="卡号"
-                maxLength={19}
-                onChangeText={setCardNumber}
+                label="Card number"
+                maxLength={23}
+                onChangeText={(value) => setCardNumber(formatCardNumber(value))}
                 placeholder="4242 4242 4242 4242"
                 value={cardNumber}
               />
@@ -165,18 +178,22 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
               <View className="flex-row gap-5">
                 <View className="flex-1">
                   <CardField
-                    label="月份"
+                    label="Month"
                     maxLength={2}
-                    onChangeText={setExpiryMonth}
+                    onChangeText={(value) =>
+                      setExpiryMonth(value.replace(/\D/g, ''))
+                    }
                     placeholder="01"
                     value={expiryMonth}
                   />
                 </View>
                 <View className="flex-1">
                   <CardField
-                    label="年份"
+                    label="Year"
                     maxLength={4}
-                    onChangeText={setExpiryYear}
+                    onChangeText={(value) =>
+                      setExpiryYear(value.replace(/\D/g, ''))
+                    }
                     placeholder="2028"
                     value={expiryYear}
                   />
@@ -185,7 +202,7 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
                   <CardField
                     label="CVC"
                     maxLength={4}
-                    onChangeText={setCvc}
+                    onChangeText={(value) => setCvc(value.replace(/\D/g, ''))}
                     placeholder="123"
                     secureTextEntry
                     value={cvc}
@@ -195,7 +212,7 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
 
               <View className="gap-2">
                 <Text className="font-medium text-[10px] uppercase tracking-[1.8px] text-paper/45">
-                  持卡人
+                  Name on card
                 </Text>
                 <TextInput
                   onChangeText={setCardHolderName}
@@ -215,15 +232,63 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
               onPress={() => bindCard.mutate()}
               tone="signal"
             >
-              安全绑定
+              Save test card
             </ActionButton>
           </View>
 
-          <Text className="font-sans text-xs leading-5 text-paper/35">
-            测试环境 · 仅支持 Pinch sandbox 测试卡
-          </Text>
+          <View className="flex-row items-center justify-between">
+            <Text className="font-sans text-xs leading-5 text-paper/35">
+              Test environment · Pinch sandbox cards only
+            </Text>
+            {demoControlsEnabled() ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={logout}
+                className="py-2 active:opacity-60"
+              >
+                <Text className="font-medium text-xs text-paper/50">
+                  Sign out
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </ScreenShell>
   );
+}
+
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function pinchCardError(payload: unknown, status: number) {
+  const detail = publicPinchMessage(payload);
+  return detail
+    ? `Pinch could not save this card: ${detail}`
+    : `Pinch could not save this card (${status}).`;
+}
+
+function publicPinchMessage(payload: unknown): string | undefined {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : payload && typeof payload === 'object'
+        ? ['message', 'error_description', 'error'].flatMap((key) => {
+            const value = (payload as Record<string, unknown>)[key];
+            return typeof value === 'string' ? [value] : [];
+          })[0]
+        : undefined;
+
+  if (!candidate) return undefined;
+  return candidate
+    .replace(/\b(?:tkn|pk|sk|app)_[A-Za-z0-9_-]+\b/g, '[redacted]')
+    .replace(/\b\d{12,19}\b/g, '[redacted]')
+    .slice(0, 180);
 }

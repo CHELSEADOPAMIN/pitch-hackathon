@@ -17,6 +17,10 @@ export default function HomeScreen() {
     );
   }
 
+  if (role === 'staff') {
+    return <StaffScreen />;
+  }
+
   if (!session) {
     return <LoginScreen />;
   }
@@ -25,9 +29,5 @@ export default function HomeScreen() {
     return <PaymentSourceScreen session={session} />;
   }
 
-  return role === 'customer' ? (
-    <CustomerScreen session={session} />
-  ) : (
-    <StaffScreen />
-  );
+  return <CustomerScreen session={session} />;
 }

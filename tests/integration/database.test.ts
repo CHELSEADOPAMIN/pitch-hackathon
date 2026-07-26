@@ -8,6 +8,7 @@ const describeDatabase =
 
 describeDatabase('Supabase schema and seed', () => {
   let sql: ReturnType<typeof postgres>;
+  const databaseSchema = process.env.DATABASE_SCHEMA ?? 'public';
 
   beforeAll(() => {
     if (!process.env.DATABASE_URL) {
@@ -24,7 +25,7 @@ describeDatabase('Supabase schema and seed', () => {
     const rows = await sql<{ table_name: string }[]>`
       select table_name
       from information_schema.tables
-      where table_schema = 'codex_voice'
+      where table_schema = ${databaseSchema}
         and table_name in ('users', 'products', 'carts', 'orders', 'merchants')
       order by table_name
     `;
@@ -42,7 +43,7 @@ describeDatabase('Supabase schema and seed', () => {
     const rows = await sql<{ indexname: string }[]>`
       select indexname
       from pg_indexes
-      where schemaname = 'codex_voice'
+      where schemaname = ${databaseSchema}
         and indexname in (
           'users_username_unique',
           'orders_checkout_quote_unique'
@@ -58,7 +59,7 @@ describeDatabase('Supabase schema and seed', () => {
 
   it('has 5–10 seeded products with integer-cent prices', async () => {
     const products = await sql<{ price_cents: number }[]>`
-      select price_cents from codex_voice.products
+      select price_cents from ${sql(databaseSchema)}.products
     `;
 
     expect(products.length).toBeGreaterThanOrEqual(5);

@@ -30,7 +30,7 @@ function OrderCard({ order }: { order: Order }) {
         </View>
         <View className="rounded-full bg-leaf px-3 py-2">
           <Text className="font-medium text-[10px] uppercase tracking-[1.5px] text-paper">
-            已支付
+            Paid
           </Text>
         </View>
       </View>
@@ -83,13 +83,19 @@ export function StaffScreen() {
       <View className="flex-1 px-6 pt-5">
         <View className="flex-row items-center justify-between">
           <BrandMark />
-          <DevRoleSwitch target="顾客" />
+          <DevRoleSwitch target="Shopper" />
         </View>
 
         <View className="mb-7 mt-11 gap-2">
-          <Text className="font-display text-5xl text-ink">今日离店</Text>
+          <Text className="font-medium text-[10px] uppercase tracking-[2.5px] text-signal">
+            Merchant dashboard
+          </Text>
+          <Text className="font-display text-5xl text-ink">
+            Today’s pickups
+          </Text>
           <Text className="font-sans text-sm text-ink/50">
-            顾客报出用户名后，按真实支付订单核对。
+            Search the customer’s name and verify their paid order before
+            handoff.
           </Text>
         </View>
 
@@ -97,7 +103,7 @@ export function StaffScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           onChangeText={setUsernameQuery}
-          placeholder="输入用户名查订单"
+          placeholder="Search orders by customer name"
           placeholderTextColor="#8D8B82"
           value={usernameQuery}
           className="mb-5 h-12 rounded-full border border-ink/15 bg-white/60 px-5 font-sans text-sm text-ink"
@@ -117,8 +123,8 @@ export function StaffScreen() {
                 {orders.error instanceof Error
                   ? orders.error.message
                   : normalizedQuery
-                    ? '没有匹配的已支付订单'
-                    : '等待第一笔已支付订单'}
+                    ? 'No matching paid orders'
+                    : 'Waiting for the first paid order'}
               </Text>
             </View>
           }

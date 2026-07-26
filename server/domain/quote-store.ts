@@ -10,13 +10,19 @@ export type CheckoutQuote = {
   items: CartItem[];
   totalCents: number;
   expiresAt: number;
-  status: 'prepared' | 'processing' | 'paid';
+  status: 'prepared' | 'processing' | 'approved' | 'paid';
+  approvedResult?: Extract<AgentResult, { status: 'paid' }>;
   paidResult?: Extract<AgentResult, { status: 'paid' }>;
 };
 
 type QuoteClaim =
   | { kind: 'claimed'; quote: CheckoutQuote }
   | { kind: 'processing' }
+  | {
+      kind: 'approved';
+      quote: CheckoutQuote;
+      result: Extract<AgentResult, { status: 'paid' }>;
+    }
   | {
       kind: 'paid';
       result: Extract<AgentResult, { status: 'paid' }>;
@@ -61,6 +67,13 @@ export class InMemoryQuoteStore {
     if (quote.status === 'paid' && quote.paidResult) {
       return { kind: 'paid', result: quote.paidResult };
     }
+    if (quote.status === 'approved' && quote.approvedResult) {
+      return {
+        kind: 'approved',
+        quote: cloneQuote(quote),
+        result: quote.approvedResult,
+      };
+    }
     if (quote.status === 'processing') return { kind: 'processing' };
     if ((this.options.now?.() ?? Date.now()) >= quote.expiresAt) {
       this.quotes.delete(quoteId);
@@ -80,10 +93,22 @@ export class InMemoryQuoteStore {
     if (quote?.status === 'processing') quote.status = 'prepared';
   }
 
-  markPaid(quoteId: string, result: Extract<AgentResult, { status: 'paid' }>) {
+  markApproved(
+    quoteId: string,
+    result: Extract<AgentResult, { status: 'paid' }>,
+  ) {
     const quote = this.quotes.get(quoteId);
     if (!quote || quote.status !== 'processing') {
       throw new DomainError('quote_not_processing');
+    }
+    quote.status = 'approved';
+    quote.approvedResult = result;
+  }
+
+  markPaid(quoteId: string, result: Extract<AgentResult, { status: 'paid' }>) {
+    const quote = this.quotes.get(quoteId);
+    if (!quote || quote.status !== 'approved') {
+      throw new DomainError('quote_not_approved');
     }
     quote.status = 'paid';
     quote.paidResult = result;
@@ -112,6 +137,9 @@ function cloneQuote(quote: CheckoutQuote): CheckoutQuote {
   return {
     ...quote,
     items: quote.items.map((item) => ({ ...item })),
+    approvedResult: quote.approvedResult
+      ? { ...quote.approvedResult }
+      : undefined,
     paidResult: quote.paidResult ? { ...quote.paidResult } : undefined,
   };
 }

@@ -35,6 +35,10 @@ export function createServer(environment: NodeJS.ProcessEnv = process.env) {
     pinch,
     realtime,
     runShoppingAgent,
+    health: {
+      database: database.healthCheck,
+      pinch: () => pinch.healthCheck(),
+    },
   });
 
   return {

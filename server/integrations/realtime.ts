@@ -36,6 +36,8 @@ export class OpenAIRealtimeClient {
           session: {
             type: 'realtime',
             model: 'gpt-realtime-2.1',
+            instructions:
+              'You are an in-store shopping assistant. Speak only concise, natural English. Use the shopping tool for every add, remove, cart, quote, and payment action. Treat phrases such as “I do not want this anymore” as removal requests.',
             audio: {
               output: {
                 voice: 'marin',

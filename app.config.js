@@ -1,15 +1,16 @@
 /** @type {import('expo/config').ExpoConfig} */
 const config = {
-  name: 'Pinch Voice Codex',
-  slug: 'pinch-voice-shopping-codex',
-  owner: 'crokily',
+  name: process.env.EXPO_APP_NAME ?? 'Pinch Voice',
+  slug: process.env.EXPO_APP_SLUG ?? 'pinch-voice-shopping',
+  owner: process.env.EXPO_OWNER ?? 'chelsea_yang',
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
-  scheme: 'pinchvoicecodex',
+  scheme: process.env.EXPO_SCHEME ?? 'pinchvoice',
   userInterfaceStyle: 'light',
   android: {
-    package: 'au.com.crokily.pinchvoice.codex',
+    package:
+      process.env.EXPO_ANDROID_PACKAGE ?? 'com.konstruq.pinchvoiceshopping',
     permissions: ['CAMERA', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
     adaptiveIcon: {
       backgroundColor: '#F4F0E6',
@@ -30,8 +31,10 @@ const config = {
     [
       'expo-camera',
       {
-        cameraPermission: '需要相机来识别你要加入购物车的商品',
-        microphonePermission: '需要麦克风来接收语音指令',
+        cameraPermission:
+          'Allow Pinch Voice to see products you want to add or remove.',
+        microphonePermission:
+          'Allow Pinch Voice to hear your shopping requests.',
         recordAudioAndroid: true,
         barcodeScannerEnabled: false,
       },
@@ -55,8 +58,11 @@ const config = {
     pinchPublishableKey:
       process.env.EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY ??
       process.env.PINCH_PUBLISHABLE_KEY,
+    enableDemoControls: process.env.EXPO_PUBLIC_ENABLE_DEMO_CONTROLS === '1',
     eas: {
-      projectId: '33b4ba14-80ff-4d92-a16a-9c6bf18d70e1',
+      projectId:
+        process.env.EXPO_EAS_PROJECT_ID ??
+        '365da739-7c8b-49a2-9ea2-db9842d59a25',
     },
   },
 };

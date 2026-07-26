@@ -40,11 +40,14 @@ describe('OpenAIRealtimeClient', () => {
         .update('user_123')
         .digest('hex'),
     });
-    expect(JSON.parse(String(requests[0].init.body))).toEqual({
+    expect(JSON.parse(String(requests[0].init.body))).toMatchObject({
       expires_after: { anchor: 'created_at', seconds: 600 },
       session: {
         type: 'realtime',
         model: 'gpt-realtime-2.1',
+        instructions: expect.stringContaining(
+          'Speak only concise, natural English',
+        ),
         audio: { output: { voice: 'marin' } },
       },
     });

@@ -1,0 +1,21 @@
+[Unit]
+Description=Pinch Voice API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pinch-voice
+Group=pinch-voice
+WorkingDirectory=/opt/pinch-voice
+EnvironmentFile=/etc/pinch-voice.env
+ExecStart=/usr/bin/node /opt/pinch-voice/dist/server/index.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/pinch-voice
+
+[Install]
+WantedBy=multi-user.target

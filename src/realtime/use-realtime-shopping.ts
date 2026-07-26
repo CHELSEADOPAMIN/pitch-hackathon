@@ -16,6 +16,7 @@ import {
   completedShoppingCalls,
   functionCallOutputEvents,
   initialGreetingEvent,
+  parseRealtimeEvent,
   type RealtimeFunctionCall,
 } from '@/realtime/protocol';
 import { shoppingSessionUpdate } from '@/realtime/session-config';
@@ -31,17 +32,6 @@ const shoppingToolArgumentsSchema = z.object({
     .optional(),
 });
 
-type RealtimeEvent = {
-  type?: string;
-  response?: {
-    status?: string;
-    output?: unknown[];
-  };
-  error?: {
-    message?: string;
-  };
-};
-
 type DataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 
 export type RealtimeStatus =
@@ -54,7 +44,7 @@ type UseRealtimeShoppingOptions = {
 };
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '未知错误';
+  return error instanceof Error ? error.message : 'An unknown error occurred.';
 }
 
 export function useRealtimeShopping({
@@ -179,8 +169,13 @@ export function useRealtimeShopping({
       channel.onmessage = (event: unknown) => {
         if (connectionAttemptRef.current !== attempt) return;
 
-        const raw = (event as { data: string }).data;
-        const realtimeEvent = JSON.parse(raw) as RealtimeEvent;
+        const realtimeEvent = parseRealtimeEvent(
+          (event as { data?: unknown }).data,
+        );
+        if (!realtimeEvent) {
+          console.warn('[realtime] Ignored a malformed data-channel event.');
+          return;
+        }
 
         if (realtimeEvent.type === 'session.updated') {
           if (!greeted) {
@@ -192,7 +187,9 @@ export function useRealtimeShopping({
         }
 
         if (realtimeEvent.type === 'error') {
-          setError(realtimeEvent.error?.message ?? 'Realtime 会话错误');
+          setError(
+            realtimeEvent.error?.message ?? 'The Realtime session failed.',
+          );
           setStatus('error');
           return;
         }
@@ -215,7 +212,7 @@ export function useRealtimeShopping({
           connectionAttemptRef.current === attempt &&
           peer?.connectionState === 'failed'
         ) {
-          setError('Realtime 音频连接失败');
+          setError('The Realtime audio connection failed.');
           setStatus('error');
         }
       };
@@ -268,7 +265,9 @@ export function useRealtimeShopping({
         },
       );
       if (!sdpResponse.ok) {
-        throw new Error(`Realtime SDP 交换失败 (${sdpResponse.status})`);
+        throw new Error(
+          `The Realtime audio handshake failed (${sdpResponse.status}).`,
+        );
       }
       await peer.setRemoteDescription({
         type: 'answer',
@@ -296,12 +295,23 @@ export function useRealtimeShopping({
     };
   }, [connect, disconnect, enabled]);
 
+  const reconnect = useCallback(() => {
+    disconnect();
+    void connect();
+  }, [connect, disconnect]);
+
+  const toggle = useCallback(() => {
+    if (peerRef.current) {
+      disconnect();
+      return;
+    }
+    void connect();
+  }, [connect, disconnect]);
+
   return {
     status,
     error,
-    reconnect: () => {
-      disconnect();
-      void connect();
-    },
+    reconnect,
+    toggle,
   };
 }

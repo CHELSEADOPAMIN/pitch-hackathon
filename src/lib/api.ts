@@ -23,7 +23,7 @@ export async function readJson<T>(
       'error' in payload &&
       typeof payload.error === 'string'
         ? payload.error
-        : `请求失败 (${response.status})`;
+        : `Request failed (${response.status})`;
     throw new Error(message);
   }
   return schema.parse(payload);

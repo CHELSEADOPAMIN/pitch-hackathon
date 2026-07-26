@@ -4,6 +4,7 @@ import {
   completedShoppingCalls,
   functionCallOutputEvents,
   initialGreetingEvent,
+  parseRealtimeEvent,
 } from '../../src/realtime/protocol';
 import { shoppingSessionUpdate } from '../../src/realtime/session-config';
 
@@ -20,7 +21,8 @@ describe('Realtime protocol', () => {
             status: 'completed',
             name: 'shopping_agent',
             call_id: 'call_123',
-            arguments: '{"request":"把这个加入购物车","needs_photo":true}',
+            arguments:
+              '{"request":"Add the product in view","needs_photo":true}',
           },
         ],
       },
@@ -56,12 +58,21 @@ describe('Realtime protocol', () => {
     expect(events[1]).toEqual({ type: 'response.create' });
   });
 
+  it('ignores malformed data-channel messages without throwing', () => {
+    expect(parseRealtimeEvent('{not-json')).toBeNull();
+    expect(parseRealtimeEvent(new Uint8Array())).toBeNull();
+    expect(parseRealtimeEvent('{"type":42}')).toBeNull();
+  });
+
   it('configures one serial low-reasoning tool and an initial greeting', () => {
     expect(shoppingSessionUpdate.session.tools).toHaveLength(1);
     expect(shoppingSessionUpdate.session.tools[0].name).toBe('shopping_agent');
     expect(shoppingSessionUpdate.session.parallel_tool_calls).toBe(false);
     expect(shoppingSessionUpdate.session.reasoning.effort).toBe('low');
     expect(shoppingSessionUpdate.session.tool_choice).toBe('auto');
+    expect(shoppingSessionUpdate.session.instructions).toContain(
+      "I don't want the milk anymore",
+    );
     expect(initialGreetingEvent.type).toBe('response.create');
   });
 });

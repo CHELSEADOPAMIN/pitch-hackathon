@@ -3,23 +3,28 @@ import {
   integer,
   jsonb,
   pgSchema,
+  pgTable,
   text,
   timestamp,
   uniqueIndex,
+  type PgTableFn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import type { CartItem } from '../domain/types';
 
-export const databaseSchema = pgSchema('codex_voice');
+export const databaseSchemaName = process.env.DATABASE_SCHEMA ?? 'public';
+const databaseTable = (
+  databaseSchemaName === 'public' ? pgTable : pgSchema(databaseSchemaName).table
+) as PgTableFn<string | undefined>;
 
-export const merchants = databaseSchema.table('merchants', {
+export const merchants = databaseTable('merchants', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
 });
 
-export const users = databaseSchema.table(
+export const users = databaseTable(
   'users',
   {
     id: text('id')
@@ -32,7 +37,7 @@ export const users = databaseSchema.table(
   (table) => [uniqueIndex('users_username_unique').on(table.username)],
 );
 
-export const products = databaseSchema.table(
+export const products = databaseTable(
   'products',
   {
     id: text('id').primaryKey(),
@@ -48,14 +53,14 @@ export const products = databaseSchema.table(
   ],
 );
 
-export const carts = databaseSchema.table('carts', {
+export const carts = databaseTable('carts', {
   userId: text('user_id')
     .primaryKey()
     .references(() => users.id),
   items: jsonb('items').$type<CartItem[]>().notNull().default([]),
 });
 
-export const orders = databaseSchema.table(
+export const orders = databaseTable(
   'orders',
   {
     id: text('id')

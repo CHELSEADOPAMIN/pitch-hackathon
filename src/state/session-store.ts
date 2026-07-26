@@ -12,6 +12,7 @@ type SessionState = {
   hydrated: boolean;
   setSession: (session: LoginResponse) => void;
   setPaymentMethodBound: () => void;
+  setRole: (role: Role) => void;
   switchRole: () => void;
   logout: () => void;
   setHydrated: (hydrated: boolean) => void;
@@ -30,6 +31,7 @@ export const useSessionStore = create<SessionState>()(
             ? { ...state.session, hasPaymentMethod: true }
             : null,
         })),
+      setRole: (role) => set({ role }),
       switchRole: () =>
         set((state) => ({
           role: state.role === 'customer' ? 'staff' : 'customer',

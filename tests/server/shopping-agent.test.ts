@@ -6,14 +6,14 @@ describe('Terra shopping message', () => {
   it('uses the AI SDK v7 canonical JPEG file part with raw base64', () => {
     const message = shoppingModelMessage({
       userId: 'user_1',
-      request: '把照片里的商品加入购物车',
+      request: 'Add the product shown in the photo',
       imageBase64: 'raw-base64',
     });
 
     expect(message).toEqual({
       role: 'user',
       content: [
-        { type: 'text', text: '把照片里的商品加入购物车' },
+        { type: 'text', text: 'Add the product shown in the photo' },
         {
           type: 'file',
           mediaType: 'image/jpeg',
@@ -26,7 +26,7 @@ describe('Terra shopping message', () => {
   it('includes only the server-validated confirmed quote', () => {
     const message = shoppingModelMessage({
       userId: 'user_1',
-      request: '用户明确确认刚才的报价',
+      request: 'The customer explicitly confirmed the prepared quote',
       checkoutConfirmation: { quoteId: 'q_exact', confirmed: true },
     });
 

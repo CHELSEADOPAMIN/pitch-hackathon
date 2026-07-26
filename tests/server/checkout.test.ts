@@ -69,6 +69,7 @@ describe('two-phase checkout', () => {
         items: CART,
       }),
     ]);
+    expect(harness.repository.cart).toEqual([]);
   });
 
   it('returns the first payment result for repeated confirmation', async () => {
@@ -84,6 +85,30 @@ describe('two-phase checkout', () => {
     expect(repeated).toEqual(first);
     expect(harness.gateway.calls).toHaveLength(1);
     expect(harness.repository.orders).toHaveLength(1);
+  });
+
+  it('retries order persistence without charging again after approval', async () => {
+    const harness = createHarness({ orderFailures: 1 });
+    const prepared = await harness.service.prepare(USER_ID);
+    if (prepared.status !== 'needs_confirmation') {
+      throw new Error('expected quote');
+    }
+
+    const first = await harness.service.confirm(USER_ID, prepared.quoteId);
+    const recovered = await harness.service.confirm(USER_ID, prepared.quoteId);
+
+    expect(first).toEqual({
+      status: 'error',
+      reason: 'internal_server_error',
+    });
+    expect(recovered).toEqual({
+      status: 'paid',
+      paymentId: 'pmt_test',
+      totalCents: 780,
+    });
+    expect(harness.gateway.calls).toHaveLength(1);
+    expect(harness.repository.orders).toHaveLength(1);
+    expect(harness.repository.cart).toEqual([]);
   });
 
   it('allows only one outbound charge for concurrent confirmation', async () => {
@@ -173,9 +198,10 @@ function createHarness(
   options: {
     quotes?: InMemoryQuoteStore;
     payment?: PinchChargeResult;
+    orderFailures?: number;
   } = {},
 ) {
-  const repository = new FakeRepository();
+  const repository = new FakeRepository(options.orderFailures ?? 0);
   const gateway = new FakeGateway(
     options.payment ?? { id: 'pmt_test', status: 'approved' },
   );
@@ -220,6 +246,8 @@ class FakeRepository implements ShoppingRepository {
       },
     ],
   ]);
+
+  constructor(private orderFailures: number) {}
 
   async findOrCreateUser(username: string) {
     const found = [...this.users.values()].find(
@@ -275,7 +303,20 @@ class FakeRepository implements ShoppingRepository {
     throw new Error('not implemented');
   }
 
+  async clearCart() {
+    this.cart = [];
+  }
+
   async createOrder(input: CreateOrderInput) {
+    if (this.orderFailures > 0) {
+      this.orderFailures -= 1;
+      throw new Error('temporary database failure');
+    }
+    const existing = this.orders.find(
+      (order) => order.checkoutQuoteId === input.checkoutQuoteId,
+    );
+    if (existing) return existing;
+
     const order: Order = {
       ...input,
       id: `order_${this.orders.length + 1}`,

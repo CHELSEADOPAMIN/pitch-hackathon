@@ -1,6 +1,11 @@
-import { Camera, CameraView } from 'expo-camera';
+import {
+  CameraView,
+  useCameraPermissions,
+  useMicrophonePermissions,
+} from 'expo-camera';
+import * as Linking from 'expo-linking';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { captureProduct } from '@/camera/capture-product';
 import { ActionButton } from '@/components/action-button';
@@ -8,6 +13,7 @@ import { BrandMark } from '@/components/brand-mark';
 import { DevRoleSwitch } from '@/components/dev-role-switch';
 import { ScreenShell } from '@/components/screen-shell';
 import type { LoginResponse } from '@/contracts/api';
+import { demoControlsEnabled } from '@/lib/runtime-config';
 import {
   type RealtimeStatus,
   useRealtimeShopping,
@@ -19,63 +25,96 @@ const statusCopy: Record<
   { eyebrow: string; title: string; detail: string }
 > = {
   idle: {
-    eyebrow: '准备中',
-    title: '正在唤醒',
-    detail: '相机与麦克风准备好后，会自动开始聆听。',
+    eyebrow: 'Voice paused',
+    title: 'Tap to talk',
+    detail: 'Hold a product inside the frame, then start the conversation.',
   },
   connecting: {
-    eyebrow: '正在连接',
-    title: '马上就好',
-    detail: '正在建立 OpenAI Realtime 音频会话。',
+    eyebrow: 'Connecting',
+    title: 'Opening the line',
+    detail: 'Starting a secure voice session.',
   },
   configuring: {
-    eyebrow: '正在配置',
-    title: '让我熟悉商店',
-    detail: '购物工具与语音策略正在就绪。',
+    eyebrow: 'Getting ready',
+    title: 'Learning the store',
+    detail: 'Loading the catalogue and shopping tools.',
   },
   ready: {
-    eyebrow: '正在聆听',
-    title: '你想买什么？',
-    detail: '拿起商品，直接说“把这个加入购物车”。',
+    eyebrow: 'Listening',
+    title: 'What would you like?',
+    detail: 'Try “add this”, “remove the milk”, or “what is in my cart?”',
   },
   working: {
-    eyebrow: '购物助手处理中',
-    title: '我看一下',
-    detail: '正在识别商品或处理你的购物请求。',
+    eyebrow: 'Working',
+    title: 'Checking that',
+    detail: 'Identifying the product or updating your cart.',
   },
   error: {
-    eyebrow: '连接中断',
-    title: '暂时没听见',
-    detail: '保持 App 在前台，然后重新连接。',
+    eyebrow: 'Voice offline',
+    title: 'Let’s reconnect',
+    detail: 'Keep the app in the foreground, then tap the voice button.',
   },
 };
 
 export function CustomerScreen({ session }: { session: LoginResponse }) {
   const cameraRef = useRef<CameraView>(null);
+  const requestedPermissions = useRef(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const [permissionsGranted, setPermissionsGranted] = useState(false);
-  const [permissionError, setPermissionError] = useState<string>();
+  const [cameraError, setCameraError] = useState<string>();
+  const [permissionActionError, setPermissionActionError] = useState<string>();
+  const [cameraPermission, requestCameraPermission, getCameraPermission] =
+    useCameraPermissions();
+  const [
+    microphonePermission,
+    requestMicrophonePermission,
+    getMicrophonePermission,
+  ] = useMicrophonePermissions();
   const logout = useSessionStore((state) => state.logout);
 
+  const requestPermissions = useCallback(async () => {
+    setPermissionActionError(undefined);
+    try {
+      await Promise.all([
+        requestCameraPermission(),
+        requestMicrophonePermission(),
+      ]);
+    } catch {
+      setPermissionActionError(
+        'Camera and microphone permissions could not be requested.',
+      );
+    }
+  }, [requestCameraPermission, requestMicrophonePermission]);
+
   useEffect(() => {
-    let mounted = true;
-    Promise.all([
-      Camera.requestCameraPermissionsAsync(),
-      Camera.requestMicrophonePermissionsAsync(),
-    ]).then(([camera, microphone]) => {
-      if (!mounted) {
-        return;
-      }
-      const granted = camera.granted && microphone.granted;
-      setPermissionsGranted(granted);
-      if (!granted) {
-        setPermissionError('需要相机和麦克风权限才能进行无感购物。');
+    if (
+      cameraPermission &&
+      microphonePermission &&
+      !cameraPermission.granted &&
+      !microphonePermission.granted &&
+      cameraPermission.canAskAgain &&
+      microphonePermission.canAskAgain &&
+      !requestedPermissions.current
+    ) {
+      requestedPermissions.current = true;
+      void requestPermissions();
+    }
+  }, [cameraPermission, microphonePermission, requestPermissions]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void Promise.all([getCameraPermission(), getMicrophonePermission()]);
       }
     });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    return () => subscription.remove();
+  }, [getCameraPermission, getMicrophonePermission]);
+
+  const permissionsGranted =
+    cameraPermission?.granted === true &&
+    microphonePermission?.granted === true;
+  const canAskAgain =
+    cameraPermission?.canAskAgain !== false &&
+    microphonePermission?.canAskAgain !== false;
 
   const capture = useCallback(
     () => captureProduct(cameraRef, cameraReady),
@@ -87,7 +126,8 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
     capture,
   });
   const copy = statusCopy[realtime.status];
-  const error = permissionError ?? realtime.error;
+  const visibleError = permissionActionError ?? cameraError ?? realtime.error;
+  const voiceActive = realtime.status !== 'idle' && realtime.status !== 'error';
 
   return (
     <ScreenShell dark>
@@ -96,79 +136,147 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
           animateShutter={false}
           facing="back"
           mode="picture"
-          onCameraReady={() => setCameraReady(true)}
+          onCameraReady={() => {
+            setCameraError(undefined);
+            setCameraReady(true);
+          }}
+          onMountError={(event) => {
+            setCameraReady(false);
+            setCameraError(event.message);
+          }}
           ref={cameraRef}
-          style={styles.hiddenCamera}
+          style={styles.camera}
         />
       ) : null}
 
-      <View className="absolute -right-28 top-28 h-72 w-72 rounded-full border border-paper/10" />
-      <View className="absolute -left-44 top-56 h-96 w-96 rounded-full border border-paper/[0.06]" />
+      <View pointerEvents="none" style={styles.topScrim} />
+      <View pointerEvents="none" style={styles.bottomScrim} />
 
-      <View className="flex-1 justify-between px-6 pb-7 pt-5">
+      <View className="flex-1 px-5 pb-5 pt-4">
         <View className="flex-row items-center justify-between">
           <BrandMark inverse />
           <DevRoleSwitch inverse />
         </View>
 
-        <View className="items-center gap-8">
-          <View className="h-56 w-56 items-center justify-center rounded-full border border-paper/15">
-            <View
-              className={`h-40 w-40 items-center justify-center rounded-full ${
-                realtime.status === 'working' ? 'bg-signal' : 'bg-leaf'
+        {permissionsGranted ? (
+          <View
+            pointerEvents="none"
+            className="mx-4 my-16 flex-1 rounded-[34px] border border-paper/25"
+          >
+            <View className="absolute -left-px -top-px h-12 w-12 rounded-tl-[34px] border-l-2 border-t-2 border-signal" />
+            <View className="absolute -right-px -top-px h-12 w-12 rounded-tr-[34px] border-r-2 border-t-2 border-signal" />
+            <View className="absolute -bottom-px -left-px h-12 w-12 rounded-bl-[34px] border-b-2 border-l-2 border-signal" />
+            <View className="absolute -bottom-px -right-px h-12 w-12 rounded-br-[34px] border-b-2 border-r-2 border-signal" />
+            <View className="absolute inset-x-0 top-5 items-center">
+              <View className="rounded-full bg-ink/55 px-4 py-2">
+                <Text className="font-medium text-[10px] uppercase tracking-[2px] text-paper/75">
+                  Keep the product in view
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View className="flex-1 justify-center">
+            <View className="gap-5 rounded-[30px] border border-paper/15 bg-ink/95 p-6">
+              <View className="gap-2">
+                <Text className="font-medium text-[10px] uppercase tracking-[2px] text-signal">
+                  Permissions needed
+                </Text>
+                <Text className="font-display text-4xl leading-10 text-paper">
+                  Let the app see and hear.
+                </Text>
+                <Text className="font-sans text-sm leading-6 text-paper/60">
+                  The live camera identifies products. The microphone lets you
+                  add, remove, review, and buy them by voice.
+                </Text>
+              </View>
+              {permissionActionError ? (
+                <Text className="font-sans text-sm text-signal">
+                  {permissionActionError}
+                </Text>
+              ) : null}
+              <ActionButton
+                onPress={() => {
+                  if (canAskAgain) {
+                    void requestPermissions();
+                  } else {
+                    void Linking.openSettings();
+                  }
+                }}
+                tone="signal"
+              >
+                {canAskAgain ? 'Allow camera and microphone' : 'Open settings'}
+              </ActionButton>
+            </View>
+          </View>
+        )}
+
+        <View className="rounded-[30px] border border-paper/15 bg-ink/80 px-5 pb-4 pt-5">
+          <View className="flex-row items-center gap-4">
+            <Pressable
+              accessibilityLabel={
+                voiceActive ? 'Pause voice assistant' : 'Start voice assistant'
+              }
+              accessibilityRole="button"
+              disabled={!permissionsGranted || !cameraReady}
+              onPress={
+                realtime.status === 'error'
+                  ? realtime.reconnect
+                  : realtime.toggle
+              }
+              className={`h-16 w-16 items-center justify-center rounded-full border-4 border-paper/15 ${
+                voiceActive ? 'bg-signal' : 'bg-leaf'
+              } ${
+                !permissionsGranted || !cameraReady
+                  ? 'opacity-40'
+                  : 'active:scale-95'
               }`}
             >
-              <View className="flex-row items-center gap-2">
-                {[22, 46, 70, 38, 58].map((height, index) => (
+              <View className="flex-row items-center gap-1">
+                {[12, 24, 16].map((height) => (
                   <View
-                    className="w-[3px] rounded-full bg-paper"
-                    key={`${height}-${index}`}
+                    className="w-1 rounded-full bg-paper"
+                    key={height}
                     style={{ height }}
                   />
                 ))}
               </View>
-            </View>
-          </View>
-
-          <View className="items-center gap-3">
-            <Text className="font-medium text-[11px] uppercase tracking-[3px] text-signal">
-              {copy.eyebrow}
-            </Text>
-            <Text className="text-center font-display text-[50px] leading-[52px] text-paper">
-              {copy.title}
-            </Text>
-            <Text className="max-w-[300px] text-center font-sans text-sm leading-6 text-paper/50">
-              {error ?? copy.detail}
-            </Text>
-          </View>
-
-          {realtime.status === 'error' && !permissionError ? (
-            <View className="w-full">
-              <ActionButton onPress={realtime.reconnect} tone="light">
-                重新连接
-              </ActionButton>
-            </View>
-          ) : null}
-        </View>
-
-        <View className="flex-row items-end justify-between">
-          <View className="gap-1">
-            <Text className="font-sans text-[10px] uppercase tracking-[2px] text-paper/35">
-              当前顾客
-            </Text>
-            <Text className="font-display text-2xl text-paper">
-              {session.username}
-            </Text>
-          </View>
-          {__DEV__ ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={logout}
-              className="py-2 active:opacity-60"
-            >
-              <Text className="font-medium text-xs text-paper/45">退出</Text>
             </Pressable>
-          ) : null}
+
+            <View className="flex-1 gap-1">
+              <Text className="font-medium text-[10px] uppercase tracking-[2px] text-signal">
+                {copy.eyebrow}
+              </Text>
+              <Text className="font-display text-[27px] leading-8 text-paper">
+                {copy.title}
+              </Text>
+              <Text className="font-sans text-xs leading-5 text-paper/55">
+                {visibleError ?? copy.detail}
+              </Text>
+            </View>
+          </View>
+
+          <View className="mt-4 flex-row items-center justify-between border-t border-paper/10 pt-3">
+            <View>
+              <Text className="font-medium text-[9px] uppercase tracking-[1.8px] text-paper/35">
+                Shopping as
+              </Text>
+              <Text className="font-sans text-sm text-paper/80">
+                {session.username}
+              </Text>
+            </View>
+            {demoControlsEnabled() ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={logout}
+                className="rounded-full border border-paper/20 px-4 py-2 active:opacity-60"
+              >
+                <Text className="font-medium text-xs text-paper/70">
+                  Sign out
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </View>
     </ScreenShell>
@@ -176,12 +284,27 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
 }
 
 const styles = StyleSheet.create({
-  hiddenCamera: {
+  camera: {
     position: 'absolute',
-    top: -2,
-    left: -2,
-    width: 1,
-    height: 1,
-    opacity: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  topScrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    height: 180,
+    backgroundColor: 'rgba(20, 24, 18, 0.5)',
+  },
+  bottomScrim: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
+    height: 340,
+    backgroundColor: 'rgba(20, 24, 18, 0.72)',
   },
 });
