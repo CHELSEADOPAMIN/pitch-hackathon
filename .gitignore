@@ -6,7 +6,10 @@ node_modules/
 dist/
 coverage/
 web-build/
-android/
-ios/
+/android/
+/ios/
+modules/*/android/build/
 *.log
 .DS_Store
+._*
+.tmp/

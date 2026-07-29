@@ -1,8 +1,15 @@
 /** @type {import('expo/config').ExpoConfig} */
+const owner = process.env.EXPO_OWNER ?? 'chelsea_yang';
+const easProjectId =
+  process.env.EXPO_EAS_PROJECT_ID ??
+  (owner === 'chelsea_yang'
+    ? '365da739-7c8b-49a2-9ea2-db9842d59a25'
+    : undefined);
+
 const config = {
   name: process.env.EXPO_APP_NAME ?? 'Pinch Voice',
   slug: process.env.EXPO_APP_SLUG ?? 'pinch-voice-shopping',
-  owner: process.env.EXPO_OWNER ?? 'chelsea_yang',
+  owner,
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
@@ -59,11 +66,7 @@ const config = {
       process.env.EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY ??
       process.env.PINCH_PUBLISHABLE_KEY,
     enableDemoControls: process.env.EXPO_PUBLIC_ENABLE_DEMO_CONTROLS === '1',
-    eas: {
-      projectId:
-        process.env.EXPO_EAS_PROJECT_ID ??
-        '365da739-7c8b-49a2-9ea2-db9842d59a25',
-    },
+    eas: easProjectId ? { projectId: easProjectId } : undefined,
   },
 };
 

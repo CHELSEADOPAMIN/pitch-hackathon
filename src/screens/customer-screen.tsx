@@ -5,8 +5,20 @@ import {
 } from 'expo-camera';
 import * as Linking from 'expo-linking';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  AppState,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
+import {
+  captureGlassesThumbnail,
+  probeGlassesLivePreview,
+  requestGlassesPermissions,
+} from '@/camera/capture-glasses';
 import { captureProduct } from '@/camera/capture-product';
 import { ActionButton } from '@/components/action-button';
 import { BrandMark } from '@/components/brand-mark';
@@ -59,9 +71,15 @@ const statusCopy: Record<
 export function CustomerScreen({ session }: { session: LoginResponse }) {
   const cameraRef = useRef<CameraView>(null);
   const requestedPermissions = useRef(false);
+  const requestedGlassesPermissions = useRef(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string>();
   const [permissionActionError, setPermissionActionError] = useState<string>();
+  const [liveProbeRunning, setLiveProbeRunning] = useState(false);
+  const [liveProbeResult, setLiveProbeResult] = useState<string>();
+  const [thumbnailProbeRunning, setThumbnailProbeRunning] = useState(false);
+  const [thumbnailProbeResult, setThumbnailProbeResult] = useState<string>();
+  const [thumbnailProbeUri, setThumbnailProbeUri] = useState<string>();
   const [cameraPermission, requestCameraPermission, getCameraPermission] =
     useCameraPermissions();
   const [
@@ -84,6 +102,13 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
       );
     }
   }, [requestCameraPermission, requestMicrophonePermission]);
+
+  useEffect(() => {
+    if (!requestedGlassesPermissions.current) {
+      requestedGlassesPermissions.current = true;
+      void requestGlassesPermissions();
+    }
+  }, []);
 
   useEffect(() => {
     if (
@@ -128,6 +153,77 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
   const copy = statusCopy[realtime.status];
   const visibleError = permissionActionError ?? cameraError ?? realtime.error;
   const voiceActive = realtime.status !== 'idle' && realtime.status !== 'error';
+  const runLiveProbe = useCallback(async () => {
+    setLiveProbeRunning(true);
+    setLiveProbeResult('Connecting to M02…');
+    try {
+      const granted = await requestGlassesPermissions();
+      if (!granted) {
+        throw new Error('Nearby Bluetooth and Wi-Fi permissions are required.');
+      }
+      const result = await probeGlassesLivePreview();
+      console.info('[PinchGlasses] Live probe', result);
+      setLiveProbeResult(
+        [
+          result.rtspReachable ? 'Live reachable' : 'Live unavailable',
+          `advertised=${String(result.advertisedSupport)}`,
+          `ack=${String(result.startAcknowledged)}`,
+          `ip=${result.glassesIp ?? 'none'}`,
+          `p2p=${String(result.p2pConnected)}`,
+          `rtsp=${result.rtspStatusLine ?? 'none'}`,
+          `ipMs=${result.ipNotificationMs ?? 'n/a'}`,
+          `readyMs=${result.rtspReadyMs ?? 'n/a'}`,
+          `totalMs=${result.totalMs}`,
+          result.error ? `error=${result.error}` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'The Live probe failed.';
+      console.info('[PinchGlasses] Live probe failed', message);
+      setLiveProbeResult(`Live probe failed · ${message}`);
+    } finally {
+      setLiveProbeRunning(false);
+    }
+  }, []);
+  const runThumbnailProbe = useCallback(async (qualityLevel: number) => {
+    setThumbnailProbeRunning(true);
+    setThumbnailProbeResult('Connecting to M02…');
+    setThumbnailProbeUri(undefined);
+    try {
+      const granted = await requestGlassesPermissions();
+      if (!granted) {
+        throw new Error('Nearby Bluetooth permission is required.');
+      }
+      const result = await captureGlassesThumbnail(qualityLevel);
+      console.info('[PinchGlasses] Thumbnail probe', result);
+      setThumbnailProbeUri(result.uri);
+      setThumbnailProbeResult(
+        [
+          `${result.qualityName} BLE photo`,
+          `${result.width}×${result.height}`,
+          `${result.byteCount} bytes`,
+          `${result.packetCount} packets`,
+          `mtu=${result.negotiatedMtu}`,
+          `ack=${result.commandError ?? 'n/a'}/${result.commandWorkType ?? 'n/a'}`,
+          `connectMs=${result.connectionMs}`,
+          `shutterMs=${result.shutterMs}`,
+          `firstChunkMs=${result.firstChunkMs}`,
+          `transferMs=${result.transferMs}`,
+          `totalMs=${result.totalMs}`,
+        ].join(' · '),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'The BLE photo probe failed.';
+      console.info('[PinchGlasses] Thumbnail probe failed', message);
+      setThumbnailProbeResult(`BLE photo failed · ${message}`);
+    } finally {
+      setThumbnailProbeRunning(false);
+    }
+  }, []);
 
   return (
     <ScreenShell dark>
@@ -255,6 +351,75 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
               </Text>
             </View>
           </View>
+
+          {demoControlsEnabled() ? (
+            <View className="mt-4 gap-2 border-t border-paper/10 pt-3">
+              <View className="flex-row gap-2">
+                {[0, 2].map((qualityLevel) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={thumbnailProbeRunning || voiceActive}
+                    key={qualityLevel}
+                    onPress={() => void runThumbnailProbe(qualityLevel)}
+                    className={`flex-1 rounded-full border border-paper/20 px-3 py-2 ${
+                      thumbnailProbeRunning || voiceActive
+                        ? 'opacity-40'
+                        : 'active:opacity-60'
+                    }`}
+                  >
+                    <Text className="text-center font-medium text-xs text-paper/70">
+                      {thumbnailProbeRunning
+                        ? 'Capturing…'
+                        : qualityLevel === 0
+                          ? 'BLE Instant photo'
+                          : 'BLE Smooth photo'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              {thumbnailProbeResult ? (
+                <Text
+                  selectable
+                  className="font-sans text-[10px] leading-4 text-paper/45"
+                >
+                  {thumbnailProbeResult}
+                </Text>
+              ) : null}
+              {thumbnailProbeUri ? (
+                <Image
+                  resizeMode="contain"
+                  source={{ uri: thumbnailProbeUri }}
+                  className="h-28 w-full rounded-2xl bg-black/25"
+                />
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                disabled={liveProbeRunning || voiceActive}
+                onPress={() => void runLiveProbe()}
+                className={`rounded-full border border-paper/20 px-4 py-2 ${
+                  liveProbeRunning || voiceActive
+                    ? 'opacity-40'
+                    : 'active:opacity-60'
+                }`}
+              >
+                <Text className="text-center font-medium text-xs text-paper/70">
+                  {voiceActive
+                    ? 'Pause voice to probe glasses Live'
+                    : liveProbeRunning
+                      ? 'Probing glasses Live…'
+                      : 'Probe glasses Live'}
+                </Text>
+              </Pressable>
+              {liveProbeResult ? (
+                <Text
+                  selectable
+                  className="font-sans text-[10px] leading-4 text-paper/45"
+                >
+                  {liveProbeResult}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
           <View className="mt-4 flex-row items-center justify-between border-t border-paper/10 pt-3">
             <View>
