@@ -179,6 +179,14 @@ export const DEMO_PRODUCTS = [
     description:
       '180g glass jar with a black lid and a white and green illustrated Pistachio Papi crunchy spread label',
   },
+  {
+    id: 'product_blackmores_omega_mental_focus',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Blackmores Omega + Mental Focus 60 Soft Capsules',
+    priceCents: 3000,
+    description:
+      'Amber glass supplement bottle with a white cap and white Blackmores label, teal OMEGA band, purple MENTAL FOCUS band, and Bacopa, L-theanine and Siberian ginseng text',
+  },
 ] as const;
 
 export async function seedDatabase(db: Database) {
