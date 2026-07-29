@@ -1,5 +1,11 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { isStepCount, ToolLoopAgent, tool, type ModelMessage } from 'ai';
+import {
+  hasToolCall,
+  isStepCount,
+  ToolLoopAgent,
+  tool,
+  type ModelMessage,
+} from 'ai';
 import { z } from 'zod';
 
 import type { ShoppingRepository } from '../db/repository';
@@ -205,11 +211,20 @@ export function createShoppingAgentRunner(
       instructions: shoppingAgentPrompt(catalogText),
       providerOptions: {
         openai: {
-          reasoningEffort: 'high',
+          reasoningEffort: 'medium',
           parallelToolCalls: false,
         },
       },
-      stopWhen: isStepCount(20),
+      stopWhen: [
+        hasToolCall(
+          'report_ambiguity',
+          'add_to_cart',
+          'remove_from_cart',
+          'prepare_checkout',
+          'confirm_checkout',
+        ),
+        isStepCount(20),
+      ],
       toolChoice: 'auto',
       tools,
     });

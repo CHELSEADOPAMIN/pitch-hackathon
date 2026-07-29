@@ -117,14 +117,18 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
       setPermissionActionError(undefined);
       try {
         if (nextProfile === 'm02') {
-          const [microphoneResult, glassesPermissionGranted] =
-            await Promise.all([
-              requestMicrophonePermission(),
-              requestGlassesPermissions(),
-            ]);
+          let microphoneResult = await getMicrophonePermission();
+          if (
+            !microphoneResult.granted &&
+            microphoneResult.canAskAgain !== false
+          ) {
+            microphoneResult = await requestMicrophonePermission();
+          }
           if (!microphoneResult.granted) {
             throw new Error('Microphone permission is required for M02 voice.');
           }
+          const glassesPermissionGranted =
+            await requestGlassesPermissions();
           if (!glassesPermissionGranted) {
             throw new Error(
               'Nearby-device permission is required to connect M02.',
@@ -136,10 +140,17 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             setGlassesStatus(connected);
           }
         } else {
-          const [cameraResult, microphoneResult] = await Promise.all([
-            requestCameraPermission(),
-            requestMicrophonePermission(),
-          ]);
+          let cameraResult = await getCameraPermission();
+          if (!cameraResult.granted && cameraResult.canAskAgain !== false) {
+            cameraResult = await requestCameraPermission();
+          }
+          let microphoneResult = await getMicrophonePermission();
+          if (
+            !microphoneResult.granted &&
+            microphoneResult.canAskAgain !== false
+          ) {
+            microphoneResult = await requestMicrophonePermission();
+          }
           if (!cameraResult.granted || !microphoneResult.granted) {
             throw new Error(
               'Camera and microphone permissions are required for Phone mode.',
@@ -166,9 +177,10 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
       }
     },
     [
+      getCameraPermission,
+      getMicrophonePermission,
       requestCameraPermission,
       requestMicrophonePermission,
-      setGlassesStatus,
     ],
   );
 
@@ -263,13 +275,17 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
 
   const switchProfile = useCallback(
     (nextProfile: DeviceProfile) => {
-      if (nextProfile === profile || voiceActive || deviceConfiguring) {
+      if (
+        nextProfile === profile ||
+        realtime.status === 'working' ||
+        deviceConfiguring
+      ) {
         return;
       }
       setAudioRouteReady(false);
       setProfile(nextProfile);
     },
-    [deviceConfiguring, profile, setProfile, voiceActive],
+    [deviceConfiguring, profile, realtime.status, setProfile],
   );
 
   const retryDeviceSetup = useCallback(() => {
@@ -326,12 +342,18 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: profile === value }}
-              disabled={voiceActive || deviceConfiguring}
+              disabled={
+                realtime.status === 'working' || deviceConfiguring
+              }
               key={value}
               onPress={() => switchProfile(value)}
               className={`flex-1 rounded-full px-4 py-3 ${
                 profile === value ? 'bg-paper' : ''
-              } ${voiceActive || deviceConfiguring ? 'opacity-60' : ''}`}
+              } ${
+                realtime.status === 'working' || deviceConfiguring
+                  ? 'opacity-60'
+                  : ''
+              }`}
             >
               <Text
                 className={`text-center font-medium text-sm ${

@@ -27,10 +27,17 @@ export async function requestGlassesPermissions() {
   if (permissions.length === 0) {
     return true;
   }
-  const results = await PermissionsAndroid.requestMultiple(permissions);
-  return permissions.every(
-    (permission) => results[permission] === PermissionsAndroid.RESULTS.GRANTED,
-  );
+
+  for (const permission of permissions) {
+    if (await PermissionsAndroid.check(permission)) {
+      continue;
+    }
+    const result = await PermissionsAndroid.request(permission);
+    if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function getGlassesStatus(): Promise<GlassesStatus> {

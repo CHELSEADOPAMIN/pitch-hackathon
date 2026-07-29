@@ -13,6 +13,42 @@ import {
 } from '../../src/realtime/session-config';
 
 describe('Realtime protocol', () => {
+  it('starts a completed shopping call before the whole response finishes', () => {
+    const calls = completedShoppingCalls({
+      type: 'response.output_item.done',
+      item: {
+        type: 'function_call',
+        status: 'completed',
+        name: 'shopping_agent',
+        call_id: 'call_early',
+        arguments:
+          '{"request":"Add the product in view","needs_photo":true}',
+      },
+    });
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        name: 'shopping_agent',
+        call_id: 'call_early',
+      }),
+    ]);
+  });
+
+  it('does not run an interrupted or incomplete shopping call early', () => {
+    expect(
+      completedShoppingCalls({
+        type: 'response.output_item.done',
+        item: {
+          type: 'function_call',
+          status: 'incomplete',
+          name: 'shopping_agent',
+          call_id: 'call_incomplete',
+          arguments: '{"request":"Add this","needs_photo":true}',
+        },
+      }),
+    ).toEqual([]);
+  });
+
   it('finds a completed shopping call anywhere in response.done output', () => {
     const calls = completedShoppingCalls({
       type: 'response.done',

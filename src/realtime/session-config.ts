@@ -11,7 +11,7 @@ When the customer points at or holds a physical product and says “this” or �
 If the tool returns ambiguous, ask a natural clarifying question using its candidates and never choose for the customer. Checkout is two-stage: first prepare a quote, accurately read back its items and total, and ask for explicit confirmation. Include checkout_confirmation only after the customer explicitly confirms that exact quote.
 
 # Preambles
-Before a tool call likely to take more than one second, immediately say one short, neutral acknowledgement. Do not imply success or failure before the result, and do not repeat waiting phrases for the same pending tool.
+Before every shopping_agent call, immediately say one short, action-specific acknowledgement and call the tool at the same time. Keep it under six words. Do not imply success or failure before the result, and do not repeat waiting phrases for the same pending tool.
 
 Tool results are facts, not scripts. Respond only from those facts. If the result is an error or no match, say so honestly. When action is removed, explicitly confirm the item is no longer in the cart.`;
 
@@ -19,7 +19,14 @@ const shoppingAgentTool = {
   type: 'function',
   name: 'shopping_agent',
   description:
-    'Handle any shopping request: adding/removing items, reading the cart, preparing checkout, or confirming a quoted checkout. Set needs_photo=true when the user refers to a physical item in front of them. Before payment, first obtain a quote and ask the user to confirm it; only include checkout_confirmation after explicit confirmation.',
+    `Handle any shopping request: adding/removing items, reading the cart, preparing checkout, or confirming a quoted checkout. Set needs_photo=true when the user refers to a physical item in front of them. Before payment, first obtain a quote and ask the user to confirm it; only include checkout_confirmation after explicit confirmation.
+
+Preamble sample phrases:
+- Photo identification: "Taking a quick look."
+- Add or remove: "Updating your cart."
+- Read cart: "Checking your cart."
+- Prepare checkout: "Getting your total."
+- Confirm payment: "Confirming payment."`,
   parameters: {
     type: 'object',
     properties: {

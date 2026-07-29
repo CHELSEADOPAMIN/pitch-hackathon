@@ -11,6 +11,7 @@ export type RealtimeFunctionCall = {
 
 type RealtimeResponseDone = {
   type?: string;
+  item?: unknown;
   response?: {
     status?: string;
     output?: unknown[];
@@ -57,6 +58,7 @@ const realtimeEventSchema = z
       })
       .passthrough()
       .optional(),
+    item: z.unknown().optional(),
     error: z
       .object({
         message: z.string().optional(),
@@ -91,6 +93,11 @@ export function parseRealtimeEvent(raw: unknown): ParsedRealtimeEvent | null {
 export function completedShoppingCalls(
   event: RealtimeResponseDone,
 ): RealtimeFunctionCall[] {
+  if (event.type === 'response.output_item.done') {
+    const call = completedShoppingCall(event.item);
+    return call ? [call] : [];
+  }
+
   if (
     event.type !== 'response.done' ||
     event.response?.status !== 'completed'
@@ -99,15 +106,20 @@ export function completedShoppingCalls(
   }
 
   return (event.response.output ?? []).flatMap((item) => {
-    const call = item as Partial<RealtimeFunctionCall>;
-    return call.type === 'function_call' &&
-      call.status === 'completed' &&
-      call.name === 'shopping_agent' &&
-      typeof call.call_id === 'string' &&
-      typeof call.arguments === 'string'
-      ? [call as RealtimeFunctionCall]
-      : [];
+    const call = completedShoppingCall(item);
+    return call ? [call] : [];
   });
+}
+
+function completedShoppingCall(item: unknown): RealtimeFunctionCall | null {
+  const call = item as Partial<RealtimeFunctionCall> | undefined;
+  return call?.type === 'function_call' &&
+    call.status === 'completed' &&
+    call.name === 'shopping_agent' &&
+    typeof call.call_id === 'string' &&
+    typeof call.arguments === 'string'
+    ? (call as RealtimeFunctionCall)
+    : null;
 }
 
 export function functionCallOutputEvents(callId: string, result: AgentResult) {
