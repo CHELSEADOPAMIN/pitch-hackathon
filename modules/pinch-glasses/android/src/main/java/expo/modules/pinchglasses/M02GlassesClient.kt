@@ -64,6 +64,8 @@ internal class M02GlassesClient(
   @Volatile
   private var sessionConnectedAt: Long? = null
 
+  private var sessionGeneration = 0
+
   fun status(): Map<String, Any?> {
     val permissionGranted = hasBluetoothPermission()
     val bondedDevice = if (permissionGranted) findBondedM02() else null
@@ -99,9 +101,12 @@ internal class M02GlassesClient(
         "No bonded M02 glasses were found. Connect M02 in Android Bluetooth settings first.",
       )
     val startedAt = SystemClock.elapsedRealtime()
+    val generation = sessionGeneration
     emitStatus("connecting", device.name)
     val ble = BleSession.connect(context, device) { detail ->
-      emitStatus("disconnected", detail)
+      if (sessionGeneration == generation) {
+        emitStatus("disconnected", detail)
+      }
     }
     activeBle = ble
     activeDevice = device
@@ -314,6 +319,7 @@ internal class M02GlassesClient(
     }
 
   private fun closeSession() {
+    sessionGeneration += 1
     activeBle?.close()
     activeBle = null
     activeDevice = null
