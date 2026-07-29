@@ -187,6 +187,38 @@ export const DEMO_PRODUCTS = [
     description:
       'Amber glass supplement bottle with a white cap and white Blackmores label, teal OMEGA band, purple MENTAL FOCUS band, and Bacopa, L-theanine and Siberian ginseng text',
   },
+  {
+    id: 'product_musashi_protein_crisp',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Musashi Protein Crisp Chocolate Bar',
+    priceCents: 450,
+    description:
+      'Small black protein snack wrapper with red MUSASHI branding, large white PROTEIN CRISP text, and a chocolate-coated crispy bar image',
+  },
+  {
+    id: 'product_laochenpi_dried_mandarin_peel',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Haoyunlai Lao Chen Pi Dried Mandarin Peel',
+    priceCents: 350,
+    description:
+      'Peach and tan Chinese snack pouch with large dark red 老陈皮 text, 好运来食品 branding, LAOCHENPI text, and a clear window showing dark dried mandarin peel',
+  },
+  {
+    id: 'product_nin_jiom_super_mint',
+    merchantId: DEMO_MERCHANT.id,
+    name: 'Nin Jiom Herbal Candy Super Mint',
+    priceCents: 590,
+    description:
+      'Round blue and cream Nin Jiom herbal candy tin with a red centre label, green leaf pattern, and Herbal Candy Super Mint text',
+  },
+  {
+    id: 'product_walkers_shortbread_fingers',
+    merchantId: DEMO_MERCHANT.id,
+    name: "Walker's Shortbread Fingers 150g",
+    priceCents: 550,
+    description:
+      "Tall red tartan Walker's box with a cream label, black WALKER'S SHORTBREAD FINGERS text, and pictures of rectangular golden shortbread biscuits",
+  },
 ] as const;
 
 export async function seedDatabase(db: Database) {
