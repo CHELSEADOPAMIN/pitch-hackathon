@@ -11,51 +11,33 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.net.ConnectivityManager
-import android.net.Network
 import android.net.Uri
-import android.net.wifi.WpsInfo
-import android.net.wifi.p2p.WifiP2pConfig
-import android.net.wifi.p2p.WifiP2pDevice
-import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.SystemClock
+import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.URL
-import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 
 internal class M02GlassesClient(
   private val context: Context,
   private val emitStatus: (String, String?) -> Unit = { _, _ -> },
 ) {
   companion object {
-    private val operationMutex = Mutex()
-
     private val serialServiceUuid =
       UUID.fromString("de5bf728-d711-4e47-af26-65e3012a5dc7")
     private val serialNotifyUuid =
@@ -66,69 +48,78 @@ internal class M02GlassesClient(
       UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     private const val actionGlassesControl = 0x41
-    private const val actionWearFunctionSupport = 0x47
     private const val actionDeviceNotification = 0x73
     private const val actionPictureThumbnail = 0xFD
     private const val logTag = "PinchGlasses"
-    private val capturePayload = byteArrayOf(2, 1, 1)
-    private val transferPayload = byteArrayOf(2, 1, 4, 1)
-    private val resetP2pPayload = byteArrayOf(2, 1, 15)
-    private val startLivePayload = byteArrayOf(2, 1, 20, 1)
-    private val stopLivePayload = byteArrayOf(2, 1, 21, 1)
   }
+
+  private val operationMutex = Mutex()
+
+  @Volatile
+  private var activeBle: BleSession? = null
+
+  @Volatile
+  private var activeDevice: BluetoothDevice? = null
+
+  @Volatile
+  private var sessionConnectedAt: Long? = null
 
   fun status(): Map<String, Any?> {
     val permissionGranted = hasBluetoothPermission()
-    val device = if (permissionGranted) findBondedM02() else null
+    val bondedDevice = if (permissionGranted) findBondedM02() else null
+    val ble = activeBle
+    val connected = ble?.isConnected == true
     return mapOf(
-      "available" to (permissionGranted && device != null),
+      "available" to (permissionGranted && bondedDevice != null),
       "permissionGranted" to permissionGranted,
-      "bonded" to (device != null),
-      "deviceName" to device?.name,
-      "deviceAddress" to device?.address,
+      "bonded" to (bondedDevice != null),
+      "connected" to connected,
+      "deviceName" to (activeDevice?.name ?: bondedDevice?.name),
+      "deviceAddress" to (activeDevice?.address ?: bondedDevice?.address),
+      "negotiatedMtu" to if (connected) ble?.negotiatedMtu else null,
+      "sessionAgeMs" to if (connected) {
+        sessionConnectedAt?.let { SystemClock.elapsedRealtime() - it }
+      } else {
+        null
+      },
     )
   }
 
-  suspend fun capturePhoto(): Map<String, Any?> = operationMutex.withLock {
-    checkRequiredPermissions()
-    val device = findBondedM02()
-      ?: error("No bonded M02 glasses were found. Connect M02 in Android Bluetooth settings first.")
-
-    emitStatus("connecting", device.name)
-    val ble = BleSession.connect(context, device)
-    var p2p: P2pSession? = null
-    try {
-      emitStatus("capturing", "Taking a photo with ${device.name}.")
-      ble.writeControl(capturePayload)
-      delay(2_000)
-
-      emitStatus("transferring", "Opening the glasses transfer network.")
-      p2p = P2pSession(context, device)
-      p2p.startDiscovery()
-      ble.writeControl(transferPayload)
-
-      val groupOwner = p2p.awaitGroupOwner()
-      val network = findP2pNetwork()
-      emitStatus("downloading", groupOwner.hostAddress)
-      val image = downloadNewestImage(network, groupOwner)
-
-      emitStatus("ready", image.name)
-      val dimensions = BitmapFactory.Options().also {
-        it.inJustDecodeBounds = true
-        BitmapFactory.decodeFile(image.absolutePath, it)
-      }
-      mapOf(
-        "uri" to Uri.fromFile(image).toString(),
-        "width" to dimensions.outWidth,
-        "height" to dimensions.outHeight,
-        "fileName" to image.name,
-        "deviceName" to device.name,
-      )
-    } finally {
-      runCatching { ble.writeControl(resetP2pPayload) }
-      p2p?.close()
-      ble.close()
+  suspend fun connect(): Map<String, Any?> = operationMutex.withLock {
+    checkBluetoothPermission()
+    val existing = activeBle
+    if (existing?.isConnected == true) {
+      emitStatus("ready", activeDevice?.name)
+      return@withLock status() + mapOf("connectionMs" to 0)
     }
+
+    closeSession()
+    val device = findBondedM02()
+      ?: error(
+        "No bonded M02 glasses were found. Connect M02 in Android Bluetooth settings first.",
+      )
+    val startedAt = SystemClock.elapsedRealtime()
+    emitStatus("connecting", device.name)
+    val ble = BleSession.connect(context, device) { detail ->
+      emitStatus("disconnected", detail)
+    }
+    activeBle = ble
+    activeDevice = device
+    sessionConnectedAt = SystemClock.elapsedRealtime()
+    emitStatus("ready", "${device.name}, MTU ${ble.negotiatedMtu}.")
+    status() + mapOf(
+      "connectionMs" to (SystemClock.elapsedRealtime() - startedAt),
+    )
+  }
+
+  suspend fun disconnect(): Map<String, Any?> = operationMutex.withLock {
+    closeSession()
+    emitStatus("disconnected", "M02 control connection closed.")
+    status()
+  }
+
+  fun close() {
+    closeSession()
   }
 
   suspend fun captureThumbnail(qualityLevel: Int): Map<String, Any?> =
@@ -137,16 +128,23 @@ internal class M02GlassesClient(
       require(qualityLevel in 0..5) {
         "M02 thumbnail quality must be between 0 (Instant) and 5 (Detailed)."
       }
-      val device = findBondedM02()
-        ?: error("No bonded M02 glasses were found. Connect M02 in Android Bluetooth settings first.")
+      val ble = activeBle?.takeIf { it.isConnected }
+        ?: error(
+          "The M02 control session is not connected. Reconnect the selected glasses before retrying.",
+        )
+      val device = activeDevice
+        ?: error("The connected M02 device identity is unavailable.")
 
-      val probeStartedAt = SystemClock.elapsedRealtime()
-      emitStatus("connecting", device.name)
-      val ble = BleSession.connect(context, device)
-      val connectedAt = SystemClock.elapsedRealtime()
+      val captureStartedAt = SystemClock.elapsedRealtime()
+      var failureStage = "capture"
       try {
+        ble.clearFrames(
+          actionGlassesControl,
+          actionDeviceNotification,
+          actionPictureThumbnail,
+        )
         emitStatus(
-          "capturing-thumbnail",
+          "capturing",
           "Taking a ${thumbnailQualityName(qualityLevel)} BLE photo with ${device.name}.",
         )
         val commandStartedAt = SystemClock.elapsedRealtime()
@@ -181,10 +179,11 @@ internal class M02GlassesClient(
                 "M02 thumbnail control response: error=$commandError " +
                   "workType=$commandWorkType frame=$commandResponseHex",
               )
-              // The vendor SDK treats 0xFF as a valid in-progress response.
-              // With work type 0xFF it means the AI photo is being captured.
+              // The vendor SDK uses 0xFF/0xFF as a valid in-progress response.
               if (commandError != 0 && commandError != 0xFF) {
-                error("The glasses rejected the BLE thumbnail command (control error $commandError).")
+                error(
+                  "The glasses rejected the BLE photo command (control error $commandError).",
+                )
               }
             }
 
@@ -205,9 +204,10 @@ internal class M02GlassesClient(
           }
         }
 
+        failureStage = "transfer"
         emitStatus(
-          "downloading-thumbnail",
-          "Receiving the photo directly over Bluetooth.",
+          "transferring",
+          "Receiving the Fine product photo directly over Bluetooth.",
         )
         val transferStartedAt = SystemClock.elapsedRealtime()
         var firstChunkAt: Long? = null
@@ -228,20 +228,20 @@ internal class M02GlassesClient(
             ble.awaitFrame(actionPictureThumbnail)
           }
           if (frame.size < 11) {
-            error("The M02 returned an incomplete BLE thumbnail packet.")
+            error("The M02 returned an incomplete BLE photo packet.")
           }
           val total = littleEndian16(frame, 7)
           val current = littleEndian16(frame, 9)
           if (total !in 1..4_096) {
-            error("The M02 returned an invalid BLE thumbnail packet count ($total).")
+            error("The M02 returned an invalid BLE photo packet count ($total).")
           }
           if (current != expectedIndex) {
             error(
-              "The M02 returned BLE thumbnail packet $current while packet $expectedIndex was expected.",
+              "The M02 returned BLE photo packet $current while packet $expectedIndex was expected.",
             )
           }
           if (expectedTotal != null && expectedTotal != total) {
-            error("The M02 changed the BLE thumbnail packet count during transfer.")
+            error("The M02 changed the BLE photo packet count during transfer.")
           }
           expectedTotal = total
           if (firstChunkAt == null) {
@@ -254,18 +254,19 @@ internal class M02GlassesClient(
           }
         }
 
+        failureStage = "JPEG validation"
         val bytes = imageBytes.toByteArray()
         if (
           bytes.size < 4 ||
           unsigned(bytes[0]) != 0xFF ||
           unsigned(bytes[1]) != 0xD8
         ) {
-          error("The M02 BLE thumbnail was not a valid JPEG image.")
+          error("The M02 BLE photo was not a valid JPEG image.")
         }
         val outputDir = File(context.cacheDir, "pinch-glasses").apply { mkdirs() }
         val output = File(
           outputDir,
-          "m02-thumbnail-q$qualityLevel-${System.currentTimeMillis()}.jpg",
+          "m02-product-q$qualityLevel-${System.currentTimeMillis()}.jpg",
         )
         FileOutputStream(output).use { it.write(bytes) }
 
@@ -275,16 +276,17 @@ internal class M02GlassesClient(
         }
         if (dimensions.outWidth <= 0 || dimensions.outHeight <= 0) {
           output.delete()
-          error("Android could not decode the M02 BLE thumbnail.")
+          error("Android could not decode the M02 BLE photo.")
         }
 
         val finishedAt = SystemClock.elapsedRealtime()
         emitStatus(
-          "thumbnail-ready",
+          "ready",
           "${dimensions.outWidth}×${dimensions.outHeight}, ${bytes.size} bytes.",
         )
         mapOf(
           "uri" to Uri.fromFile(output).toString(),
+          "base64" to Base64.encodeToString(bytes, Base64.NO_WRAP),
           "width" to dimensions.outWidth,
           "height" to dimensions.outHeight,
           "fileName" to output.name,
@@ -294,244 +296,29 @@ internal class M02GlassesClient(
           "byteCount" to bytes.size,
           "packetCount" to requireNotNull(expectedTotal),
           "negotiatedMtu" to ble.negotiatedMtu,
-          "connectionMs" to (connectedAt - probeStartedAt),
+          "connectionMs" to 0,
           "shutterMs" to (requireNotNull(thumbnailReadyAt) - commandStartedAt),
           "firstChunkMs" to (requireNotNull(firstChunkAt) - commandStartedAt),
           "transferMs" to (finishedAt - transferStartedAt),
-          "totalMs" to (finishedAt - probeStartedAt),
+          "totalMs" to (finishedAt - captureStartedAt),
           "commandError" to commandError,
           "commandWorkType" to commandWorkType,
           "commandResponseHex" to commandResponseHex,
         )
-      } finally {
-        ble.close()
-      }
-    }
-
-  suspend fun probeLivePreview(): Map<String, Any?> = operationMutex.withLock {
-    checkRequiredPermissions()
-    val device = findBondedM02()
-      ?: error("No bonded M02 glasses were found. Connect M02 in Android Bluetooth settings first.")
-
-    val probeStartedAt = SystemClock.elapsedRealtime()
-    var capabilityFrame: ByteArray? = null
-    var advertisedSupport: Boolean? = null
-    var startAcknowledged: Boolean? = null
-    var startErrorCode: Int? = null
-    var liveNotificationType: Int? = null
-    var glassesIp: String? = null
-    var p2pConnected = false
-    var tcpConnected = false
-    var rtspReachable = false
-    var rtspStatusLine: String? = null
-    var ipNotificationMs: Long? = null
-    var rtspReadyMs: Long? = null
-    var errorMessage: String? = null
-    var liveStartSent = false
-
-    emitStatus("connecting", device.name)
-    val ble = BleSession.connect(context, device)
-    var p2p: P2pSession? = null
-    try {
-      emitStatus("probing-capability", "Reading the glasses Live capability flag.")
-      ble.write(
-        actionWearFunctionSupport,
-        byteArrayOf(1, 0),
-      )
-      capabilityFrame = withTimeoutOrNull(3_000) {
-        ble.awaitFrame(actionWearFunctionSupport)
-      }
-      advertisedSupport = capabilityFrame?.let(::parseAdvertisedLiveSupport)
-
-      emitStatus(
-        "starting-live",
-        if (advertisedSupport == true) {
-          "The firmware advertises Live preview; starting its stream."
-        } else {
-          "The firmware does not advertise Live preview; testing the official command directly."
-        },
-      )
-      p2p = P2pSession(context, device)
-      p2p.startDiscovery()
-      ble.writeControl(startLivePayload)
-      liveStartSent = true
-      val liveStartedAt = SystemClock.elapsedRealtime()
-
-      emitStatus("connecting-p2p", "Waiting for the glasses streaming network.")
-      val outcomeDeadline = liveStartedAt + 15_000
-      while (SystemClock.elapsedRealtime() < outcomeDeadline) {
-        val controlFrame = ble.pollFrame(actionGlassesControl)
-        if (
-          controlFrame != null &&
-          controlFrame.size > 9 &&
-          unsigned(controlFrame[7]) == 1 &&
-          unsigned(controlFrame[8]) == 20
-        ) {
-          startErrorCode = unsigned(controlFrame[9])
-          startAcknowledged = startErrorCode == 0
-          if (startAcknowledged == false) {
-            errorMessage =
-              "The glasses rejected Live preview (control error $startErrorCode)."
-            break
-          }
-        }
-
-        val deviceFrame = ble.pollFrame(actionDeviceNotification)
-        if (deviceFrame != null && deviceFrame.size > 6) {
-          when (val type = unsigned(deviceFrame[6])) {
-            8 -> {
-              liveNotificationType = type
-              if (deviceFrame.size < 11) {
-                errorMessage = "The glasses returned an incomplete Live IP notification."
-              } else {
-                glassesIp = (7..10)
-                  .joinToString(".") { unsigned(deviceFrame[it]).toString() }
-                ipNotificationMs = SystemClock.elapsedRealtime() - liveStartedAt
-              }
-            }
-
-            9 -> {
-              liveNotificationType = type
-              val primary = deviceFrame.getOrNull(7)?.let(::unsigned)
-              val secondary = deviceFrame.getOrNull(8)?.let(::unsigned)
-              errorMessage =
-                "The glasses reported a Live network error ($primary/$secondary)."
-            }
-          }
-        }
-
-        if (glassesIp != null || errorMessage != null) {
-          break
-        }
-        delay(50)
-      }
-
-      if (glassesIp == null && errorMessage == null) {
-        errorMessage =
-          "The glasses did not return a Live stream address within 15 seconds."
-      }
-
-      if (glassesIp != null) {
-        val network = findP2pNetwork()
-        p2pConnected = true
-        emitStatus("probing-rtsp", "Testing rtsp://$glassesIp:8554/ch0.")
-        val rtsp = probeRtspWithRetry(network, requireNotNull(glassesIp))
-        tcpConnected = rtsp.tcpConnected
-        rtspReachable = rtsp.reachable
-        rtspStatusLine = rtsp.statusLine
-        rtspReadyMs = if (rtsp.reachable) {
-          SystemClock.elapsedRealtime() - liveStartedAt
-        } else {
-          null
-        }
-        if (rtsp.reachable) {
-          emitStatus("live-reachable", rtsp.statusLine)
-        } else {
-          errorMessage = rtsp.error
-            ?: "The glasses returned an IP address, but the RTSP stream was not reachable."
-        }
-      }
-    } catch (error: Throwable) {
-      if (error is CancellationException) {
-        throw error
-      }
-      errorMessage = error.message ?: error.javaClass.simpleName
-    } finally {
-      if (liveStartSent) {
-        emitStatus("stopping-live", "Stopping the diagnostic stream.")
-        runCatching { ble.writeControl(stopLivePayload) }
-      }
-      p2p?.close()
-      ble.close()
-    }
-
-    if (!rtspReachable) {
-      emitStatus("live-unsupported", errorMessage)
-    }
-    mapOf(
-      "deviceName" to device.name,
-      "advertisedSupport" to advertisedSupport,
-      "capabilityReceived" to (capabilityFrame != null),
-      "capabilityRawHex" to capabilityFrame?.toHex(),
-      "startAcknowledged" to startAcknowledged,
-      "startErrorCode" to startErrorCode,
-      "liveNotificationType" to liveNotificationType,
-      "glassesIp" to glassesIp,
-      "p2pConnected" to p2pConnected,
-      "tcpConnected" to tcpConnected,
-      "rtspReachable" to rtspReachable,
-      "rtspStatusLine" to rtspStatusLine,
-      "ipNotificationMs" to ipNotificationMs,
-      "rtspReadyMs" to rtspReadyMs,
-      "totalMs" to (SystemClock.elapsedRealtime() - probeStartedAt),
-      "error" to errorMessage,
-    )
-  }
-
-  private fun parseAdvertisedLiveSupport(frame: ByteArray): Boolean? {
-    if (
-      frame.size <= 12 ||
-      unsigned(frame[0]) != 0xBC ||
-      unsigned(frame[1]) != actionWearFunctionSupport
-    ) {
-      return null
-    }
-    return (unsigned(frame[12]) and 0x80) != 0
-  }
-
-  private suspend fun probeRtspWithRetry(
-    network: Network,
-    host: String,
-  ): RtspProbe {
-    var last = RtspProbe()
-    repeat(10) {
-      last = probeRtsp(network, host)
-      if (last.reachable) {
-        return last
-      }
-      delay(200)
-    }
-    return last
-  }
-
-  private suspend fun probeRtsp(network: Network, host: String): RtspProbe =
-    withContext(Dispatchers.IO) {
-      try {
-        network.socketFactory.createSocket().use { socket ->
-          socket.soTimeout = 800
-          socket.connect(InetSocketAddress(host, 8554), 800)
-          val request =
-            "OPTIONS rtsp://$host:8554/ch0 RTSP/1.0\r\n" +
-              "CSeq: 1\r\n" +
-              "User-Agent: PinchLiveProbe\r\n\r\n"
-          val output = socket.getOutputStream().bufferedWriter(Charsets.US_ASCII)
-          output.write(request)
-          output.flush()
-          val statusLine = socket.getInputStream()
-            .bufferedReader(Charsets.US_ASCII)
-            .readLine()
-          RtspProbe(
-            tcpConnected = true,
-            reachable = statusLine?.startsWith("RTSP/") == true,
-            statusLine = statusLine,
-            error = if (statusLine == null) {
-              "The RTSP server accepted TCP but returned no RTSP response."
-            } else {
-              null
-            },
-          )
-        }
       } catch (error: Throwable) {
-        RtspProbe(error = error.message ?: error.javaClass.simpleName)
+        closeSession()
+        val detail = error.message ?: error.javaClass.simpleName
+        emitStatus("error", "M02 $failureStage failed: $detail")
+        throw IllegalStateException("M02 $failureStage failed: $detail", error)
       }
     }
 
-  private data class RtspProbe(
-    val tcpConnected: Boolean = false,
-    val reachable: Boolean = false,
-    val statusLine: String? = null,
-    val error: String? = null,
-  )
+  private fun closeSession() {
+    activeBle?.close()
+    activeBle = null
+    activeDevice = null
+    sessionConnectedAt = null
+  }
 
   private fun unsigned(byte: Byte): Int = byte.toInt() and 0xFF
 
@@ -543,19 +330,6 @@ internal class M02GlassesClient(
 
   private fun ByteArray.toHex(): String =
     joinToString("") { "%02X".format(unsigned(it)) }
-
-  private fun checkRequiredPermissions() {
-    checkBluetoothPermission()
-    if (
-      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-      ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.NEARBY_WIFI_DEVICES,
-      ) != PackageManager.PERMISSION_GRANTED
-    ) {
-      error("Nearby Wi-Fi permission is required to download a photo from the M02 glasses.")
-    }
-  }
 
   private fun checkBluetoothPermission() {
     if (!hasBluetoothPermission()) {
@@ -584,103 +358,26 @@ internal class M02GlassesClient(
       ?.firstOrNull { it.name?.startsWith("M02", ignoreCase = true) == true }
   }
 
-  private suspend fun findP2pNetwork(): Network = withTimeout(8_000) {
-    val connectivityManager =
-      context.getSystemService(ConnectivityManager::class.java)
-    while (true) {
-      val network = connectivityManager.allNetworks.firstOrNull {
-        connectivityManager.getLinkProperties(it)
-          ?.interfaceName
-          ?.startsWith("p2p", ignoreCase = true) == true
-      }
-      if (network != null) {
-        return@withTimeout network
-      }
-      delay(200)
-    }
-    error("The Wi-Fi Direct network did not become available.")
-  }
-
-  private suspend fun downloadNewestImage(
-    network: Network,
-    groupOwner: InetAddress,
-  ): File = withContext(Dispatchers.IO) {
-    val host = groupOwner.hostAddress
-      ?: error("The M02 transfer-network address is unavailable.")
-    val manifest = readText(network, host, "/files/media.config")
-    val imagePath = manifest
-      .lineSequence()
-      .map(String::trim)
-      .filter(String::isNotEmpty)
-      .filter {
-        it.endsWith(".jpg", ignoreCase = true) ||
-          it.endsWith(".jpeg", ignoreCase = true)
-      }
-      .lastOrNull()
-      ?: error("The M02 media list did not contain a photo.")
-
-    val encodedPath = imagePath
-      .split('/')
-      .joinToString("/") { Uri.encode(it) }
-    val safeName = imagePath
-      .substringAfterLast('/')
-      .replace(Regex("[^A-Za-z0-9._-]"), "_")
-    val outputDir = File(context.cacheDir, "pinch-glasses").apply { mkdirs() }
-    val output = File(outputDir, safeName.ifBlank { "m02-capture.jpg" })
-
-    val connection = open(network, host, "/files/$encodedPath")
-    try {
-      connection.inputStream.use { input ->
-        FileOutputStream(output).use { sink -> input.copyTo(sink) }
-      }
-    } finally {
-      connection.disconnect()
-    }
-    if (output.length() == 0L) {
-      output.delete()
-      error("The M02 returned an empty photo.")
-    }
-    output
-  }
-
-  private fun readText(network: Network, host: String, path: String): String {
-    val connection = open(network, host, path)
-    return try {
-      connection.inputStream.bufferedReader().use { it.readText() }
-    } finally {
-      connection.disconnect()
-    }
-  }
-
-  private fun open(network: Network, host: String, path: String): HttpURLConnection {
-    val connection =
-      network.openConnection(URL("http", host, 80, path)) as HttpURLConnection
-    connection.connectTimeout = 7_000
-    connection.readTimeout = 15_000
-    connection.useCaches = false
-    connection.instanceFollowRedirects = false
-    connection.setRequestProperty("Connection", "close")
-    connection.setRequestProperty("User-Agent", "okhttp/4.12.0")
-    connection.connect()
-    if (connection.responseCode !in 200..299) {
-      val code = connection.responseCode
-      connection.disconnect()
-      error("The M02 transfer server returned HTTP $code for $path.")
-    }
-    return connection
-  }
-
   private class BleSession private constructor(
     private val gatt: BluetoothGatt,
     private val writeCharacteristic: BluetoothGattCharacteristic,
     private val framesByAction: ConcurrentHashMap<Int, Channel<ByteArray>>,
+    private val connected: AtomicBoolean,
     val negotiatedMtu: Int,
   ) {
+    val isConnected: Boolean
+      get() = connected.get()
+
     companion object {
       @SuppressLint("MissingPermission")
-      suspend fun connect(context: Context, device: BluetoothDevice): BleSession {
+      suspend fun connect(
+        context: Context,
+        device: BluetoothDevice,
+        onDisconnected: (String) -> Unit,
+      ): BleSession {
         val ready = CompletableDeferred<BleSession>()
-        val completed = AtomicBoolean(false)
+        val setupCompleted = AtomicBoolean(false)
+        val connected = AtomicBoolean(false)
         val framesByAction = ConcurrentHashMap<Int, Channel<ByteArray>>()
         var discoveredWrite: BluetoothGattCharacteristic? = null
         var discoveredNotify: BluetoothGattCharacteristic? = null
@@ -693,14 +390,17 @@ internal class M02GlassesClient(
         }
 
         fun fail(gatt: BluetoothGatt, message: String) {
-          if (completed.compareAndSet(false, true)) {
+          connected.set(false)
+          if (setupCompleted.compareAndSet(false, true)) {
             ready.completeExceptionally(IllegalStateException(message))
             runCatching { gatt.disconnect() }
+          } else {
+            onDisconnected(message)
           }
         }
 
         fun enableNotifications(gatt: BluetoothGatt) {
-          if (completed.get()) {
+          if (setupCompleted.get()) {
             return
           }
           val notifyCharacteristic = discoveredNotify
@@ -752,7 +452,7 @@ internal class M02GlassesClient(
           }
 
           override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (completed.get()) {
+            if (setupCompleted.get()) {
               return
             }
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -795,7 +495,7 @@ internal class M02GlassesClient(
             descriptor: BluetoothGattDescriptor,
             status: Int,
           ) {
-            if (descriptor.uuid != notifyDescriptorUuid || completed.get()) {
+            if (descriptor.uuid != notifyDescriptorUuid || setupCompleted.get()) {
               return
             }
             val writeCharacteristic = discoveredWrite
@@ -803,12 +503,14 @@ internal class M02GlassesClient(
               fail(gatt, "M02 notification setup failed (status $status).")
               return
             }
-            if (completed.compareAndSet(false, true)) {
+            if (setupCompleted.compareAndSet(false, true)) {
+              connected.set(true)
               ready.complete(
                 BleSession(
                   gatt,
                   writeCharacteristic,
                   framesByAction,
+                  connected,
                   negotiatedMtu,
                 ),
               )
@@ -847,16 +549,9 @@ internal class M02GlassesClient(
       }
     }
 
-    @Suppress("DEPRECATION")
     @SuppressLint("MissingPermission")
     suspend fun writeControl(payload: ByteArray) {
-      write(actionGlassesControl, payload)
-    }
-
-    @Suppress("DEPRECATION")
-    @SuppressLint("MissingPermission")
-    suspend fun write(action: Int, payload: ByteArray) {
-      writePacket(action, payload, 250)
+      writePacket(actionGlassesControl, payload, 250)
     }
 
     suspend fun writeFast(action: Int, payload: ByteArray) {
@@ -870,6 +565,7 @@ internal class M02GlassesClient(
       payload: ByteArray,
       settleMs: Long,
     ) {
+      check(isConnected) { "The M02 Bluetooth connection is not active." }
       val packet = frame(action, payload)
       val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         gatt.writeCharacteristic(
@@ -902,10 +598,21 @@ internal class M02GlassesClient(
         .tryReceive()
         .getOrNull()
 
+    fun clearFrames(vararg actions: Int) {
+      actions.forEach { action ->
+        while (pollFrame(action) != null) {
+          // Drain stale command and thumbnail responses from the warm session.
+        }
+      }
+    }
+
     @SuppressLint("MissingPermission")
     fun close() {
+      connected.set(false)
       runCatching { gatt.disconnect() }
       gatt.close()
+      framesByAction.values.forEach { it.close() }
+      framesByAction.clear()
     }
 
     private fun frame(action: Int, payload: ByteArray): ByteArray {
@@ -979,128 +686,7 @@ internal class M02GlassesClient(
           } else {
             buffer.copyOfRange(frameLength, buffer.size)
           }
-          if (buffer.isEmpty()) {
-            return
-          }
         }
-      }
-    }
-  }
-
-  @SuppressLint("MissingPermission")
-  private class P2pSession(
-    private val context: Context,
-    private val bluetoothDevice: BluetoothDevice,
-  ) {
-    private val manager =
-      context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
-    private val channel = manager.initialize(context, context.mainLooper, null)
-    private val groupOwner = CompletableDeferred<InetAddress>()
-    private var connecting = false
-    private var registered = false
-
-    private val receiver = object : BroadcastReceiver() {
-      override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-          WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
-            manager.requestPeers(channel) { list ->
-              val peers = list.deviceList
-              val match = peers.firstOrNull(::matchesDevice)
-                ?: if (peers.size == 1) peers.first() else null
-              if (match != null && !connecting && !groupOwner.isCompleted) {
-                connect(match)
-              }
-            }
-          }
-
-          WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
-            manager.requestConnectionInfo(channel) { info ->
-              if (
-                info.groupFormed &&
-                info.groupOwnerAddress != null &&
-                !groupOwner.isCompleted
-              ) {
-                groupOwner.complete(info.groupOwnerAddress)
-              }
-            }
-          }
-        }
-      }
-    }
-
-    suspend fun startDiscovery() = withContext(Dispatchers.Main) {
-      if (!registered) {
-        val filter = IntentFilter().apply {
-          addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-          addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-          addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-          addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-          @Suppress("DEPRECATION")
-          context.registerReceiver(receiver, filter)
-        }
-        registered = true
-      }
-
-      manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-        override fun onSuccess() = Unit
-
-        override fun onFailure(reason: Int) {
-          if (!groupOwner.isCompleted) {
-            groupOwner.completeExceptionally(
-              IllegalStateException("M02 Wi-Fi Direct discovery failed (reason $reason)."),
-            )
-          }
-        }
-      })
-    }
-
-    suspend fun awaitGroupOwner(): InetAddress =
-      withTimeout(25_000) { groupOwner.await() }
-
-    private fun matchesDevice(device: WifiP2pDevice): Boolean {
-      val expectedName = bluetoothDevice.name.orEmpty()
-      val expectedSuffix = bluetoothDevice.address
-        .replace(":", "")
-        .takeLast(4)
-      return device.deviceName.equals(expectedName, ignoreCase = true) ||
-        device.deviceName.startsWith("M02", ignoreCase = true) ||
-        device.deviceName.endsWith(expectedSuffix, ignoreCase = true)
-    }
-
-    private fun connect(device: WifiP2pDevice) {
-      connecting = true
-      val config = WifiP2pConfig().apply {
-        deviceAddress = device.deviceAddress
-        wps.setup = WpsInfo.PBC
-      }
-      manager.connect(channel, config, object : WifiP2pManager.ActionListener {
-        override fun onSuccess() = Unit
-
-        override fun onFailure(reason: Int) {
-          connecting = false
-          if (!groupOwner.isCompleted) {
-            groupOwner.completeExceptionally(
-              IllegalStateException("M02 Wi-Fi Direct connection failed (reason $reason)."),
-            )
-          }
-        }
-      })
-    }
-
-    suspend fun close() = withContext(Dispatchers.Main) {
-      runCatching { manager.stopPeerDiscovery(channel, null) }
-      runCatching { manager.cancelConnect(channel, null) }
-      runCatching { manager.removeGroup(channel, null) }
-      if (registered) {
-        runCatching { context.unregisterReceiver(receiver) }
-        registered = false
-      }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-        runCatching { channel.close() }
       }
     }
   }

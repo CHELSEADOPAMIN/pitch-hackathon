@@ -20,6 +20,36 @@ type RealtimeResponseDone = {
 const realtimeEventSchema = z
   .object({
     type: z.string().optional(),
+    session: z
+      .object({
+        audio: z
+          .object({
+            input: z
+              .object({
+                noise_reduction: z
+                  .object({
+                    type: z.string().optional(),
+                  })
+                  .passthrough()
+                  .nullable()
+                  .optional(),
+                turn_detection: z
+                  .object({
+                    type: z.string().optional(),
+                    threshold: z.number().optional(),
+                  })
+                  .passthrough()
+                  .nullable()
+                  .optional(),
+              })
+              .passthrough()
+              .optional(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
     response: z
       .object({
         status: z.string().optional(),
@@ -37,6 +67,15 @@ const realtimeEventSchema = z
   .passthrough();
 
 export type ParsedRealtimeEvent = z.infer<typeof realtimeEventSchema>;
+
+export function realtimeAudioInputSummary(event: ParsedRealtimeEvent) {
+  const input = event.session?.audio?.input;
+  return {
+    noiseReduction: input?.noise_reduction?.type,
+    turnDetection: input?.turn_detection?.type,
+    threshold: input?.turn_detection?.threshold,
+  };
+}
 
 export function parseRealtimeEvent(raw: unknown): ParsedRealtimeEvent | null {
   if (typeof raw !== 'string') return null;

@@ -5,35 +5,30 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { captureProductWithGlasses } from './capture-glasses';
 import { PRODUCT_IMAGE_JPEG_QUALITY, productImageResize } from './image-policy';
 
+export type CaptureSource = 'phone' | 'm02';
+
 export async function captureProduct(
+  source: CaptureSource,
   cameraRef: RefObject<CameraView | null>,
-  ready: boolean,
+  cameraReady: boolean,
 ) {
-  const glassesPhoto = await captureProductWithGlasses();
-  if (glassesPhoto) {
-    return processProductImage(
-      glassesPhoto.uri,
-      glassesPhoto.width,
-      glassesPhoto.height,
-    );
+  if (source === 'm02') {
+    const glassesPhoto = await captureProductWithGlasses();
+    return glassesPhoto.base64;
   }
 
-  if (!cameraRef.current || !ready) {
-    throw new Error('The camera is not ready yet.');
+  if (!cameraRef.current || !cameraReady) {
+    throw new Error('The phone camera is not ready yet.');
   }
 
   const photo = await cameraRef.current.takePictureAsync({
     shutterSound: false,
   });
-  return processProductImage(photo.uri, photo.width, photo.height);
-}
-
-async function processProductImage(uri: string, width: number, height: number) {
-  if (width <= 0 || height <= 0) {
-    throw new Error('The product photo dimensions are invalid.');
+  if (photo.width <= 0 || photo.height <= 0) {
+    throw new Error('The phone product photo dimensions are invalid.');
   }
-  const resize = productImageResize(width, height);
-  const context = ImageManipulator.manipulate(uri);
+  const resize = productImageResize(photo.width, photo.height);
+  const context = ImageManipulator.manipulate(photo.uri);
   context.resize(resize);
   const image = await context.renderAsync();
   const result = await image.saveAsync({
@@ -43,7 +38,7 @@ async function processProductImage(uri: string, width: number, height: number) {
   });
 
   if (!result.base64) {
-    throw new Error('The product photo could not be processed.');
+    throw new Error('The phone product photo could not be processed.');
   }
   return result.base64;
 }

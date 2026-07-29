@@ -5,8 +5,12 @@ import {
   functionCallOutputEvents,
   initialGreetingEvent,
   parseRealtimeEvent,
+  realtimeAudioInputSummary,
 } from '../../src/realtime/protocol';
-import { shoppingSessionUpdate } from '../../src/realtime/session-config';
+import {
+  shoppingSessionUpdate,
+  shoppingSessionUpdateFor,
+} from '../../src/realtime/session-config';
 
 describe('Realtime protocol', () => {
   it('finds a completed shopping call anywhere in response.done output', () => {
@@ -74,5 +78,42 @@ describe('Realtime protocol', () => {
       "I don't want the milk anymore",
     );
     expect(initialGreetingEvent.type).toBe('response.create');
+  });
+
+  it('uses near-field noise reduction and stricter server VAD for M02', () => {
+    const update = shoppingSessionUpdateFor('m02');
+
+    expect(update.session.audio.input).toMatchObject({
+      noise_reduction: { type: 'near_field' },
+      turn_detection: {
+        type: 'server_vad',
+        threshold: 0.65,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+      },
+    });
+  });
+
+  it('reads the effective audio input configuration from session.updated', () => {
+    const event = parseRealtimeEvent(
+      JSON.stringify({
+        type: 'session.updated',
+        session: {
+          audio: {
+            input: {
+              noise_reduction: { type: 'near_field' },
+              turn_detection: { type: 'server_vad', threshold: 0.65 },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(event).not.toBeNull();
+    expect(realtimeAudioInputSummary(event!)).toEqual({
+      noiseReduction: 'near_field',
+      turnDetection: 'server_vad',
+      threshold: 0.65,
+    });
   });
 });

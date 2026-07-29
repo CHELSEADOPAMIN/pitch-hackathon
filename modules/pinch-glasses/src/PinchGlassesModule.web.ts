@@ -1,37 +1,43 @@
 import { registerWebModule, NativeModule } from 'expo';
 
 import {
-  type GlassesLiveProbe,
-  type GlassesPhoto,
+  type AudioRoute,
+  type AudioRouteStatus,
   type GlassesStatus,
   type GlassesThumbnailPhoto,
   type PinchGlassesModuleEvents,
 } from './PinchGlasses.types';
 
-// PinchGlassesModule is not available on the web platform.
 class PinchGlassesModule extends NativeModule<PinchGlassesModuleEvents> {
   async getStatusAsync(): Promise<GlassesStatus> {
     return {
       available: false,
       bonded: false,
+      connected: false,
       permissionGranted: false,
     };
   }
 
-  async capturePhotoAsync(): Promise<GlassesPhoto> {
-    throw new Error('M02 glasses capture is only available on Android.');
+  async connectAsync(): Promise<GlassesStatus> {
+    throw new Error('M02 glasses are only available on Android.');
+  }
+
+  async disconnectAsync(): Promise<GlassesStatus> {
+    return this.getStatusAsync();
   }
 
   async captureThumbnailAsync(
     _qualityLevel: number,
   ): Promise<GlassesThumbnailPhoto> {
-    throw new Error(
-      'M02 glasses thumbnail capture is only available on Android.',
-    );
+    throw new Error('M02 glasses capture is only available on Android.');
   }
 
-  async probeLivePreviewAsync(): Promise<GlassesLiveProbe> {
-    throw new Error('M02 glasses Live probing is only available on Android.');
+  async setAudioRouteAsync(_route: AudioRoute): Promise<AudioRouteStatus> {
+    throw new Error('Explicit audio routing is only available on Android.');
+  }
+
+  async clearAudioRouteAsync(): Promise<AudioRouteStatus> {
+    return { selected: false };
   }
 }
 

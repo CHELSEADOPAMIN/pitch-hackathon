@@ -1,8 +1,8 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
 import {
-  type GlassesLiveProbe,
-  type GlassesPhoto,
+  type AudioRoute,
+  type AudioRouteStatus,
   type GlassesStatus,
   type GlassesThumbnailPhoto,
   type PinchGlassesModuleEvents,
@@ -10,9 +10,11 @@ import {
 
 declare class PinchGlassesModule extends NativeModule<PinchGlassesModuleEvents> {
   getStatusAsync(): Promise<GlassesStatus>;
-  capturePhotoAsync(): Promise<GlassesPhoto>;
+  connectAsync(): Promise<GlassesStatus>;
+  disconnectAsync(): Promise<GlassesStatus>;
   captureThumbnailAsync(qualityLevel: number): Promise<GlassesThumbnailPhoto>;
-  probeLivePreviewAsync(): Promise<GlassesLiveProbe>;
+  setAudioRouteAsync(route: AudioRoute): Promise<AudioRouteStatus>;
+  clearAudioRouteAsync(): Promise<AudioRouteStatus>;
 }
 
 export default requireNativeModule<PinchGlassesModule>('PinchGlasses');

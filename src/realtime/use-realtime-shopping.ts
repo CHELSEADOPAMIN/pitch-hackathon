@@ -17,9 +17,11 @@ import {
   functionCallOutputEvents,
   initialGreetingEvent,
   parseRealtimeEvent,
+  realtimeAudioInputSummary,
   type RealtimeFunctionCall,
 } from '@/realtime/protocol';
-import { shoppingSessionUpdate } from '@/realtime/session-config';
+import { shoppingSessionUpdateFor } from '@/realtime/session-config';
+import type { DeviceProfile } from '@/state/device-profile-store';
 
 const shoppingToolArgumentsSchema = z.object({
   request: z.string().min(1),
@@ -41,6 +43,7 @@ type UseRealtimeShoppingOptions = {
   userId: string;
   enabled: boolean;
   capture: () => Promise<string>;
+  deviceProfile: DeviceProfile;
 };
 
 function errorMessage(error: unknown) {
@@ -51,6 +54,7 @@ export function useRealtimeShopping({
   userId,
   enabled,
   capture,
+  deviceProfile,
 }: UseRealtimeShoppingOptions) {
   const [status, setStatus] = useState<RealtimeStatus>('idle');
   const [error, setError] = useState<string>();
@@ -163,7 +167,7 @@ export function useRealtimeShopping({
       channel.onopen = () => {
         if (connectionAttemptRef.current !== attempt) return;
         setStatus('configuring');
-        send(shoppingSessionUpdate);
+        send(shoppingSessionUpdateFor(deviceProfile));
       };
 
       channel.onmessage = (event: unknown) => {
@@ -178,12 +182,25 @@ export function useRealtimeShopping({
         }
 
         if (realtimeEvent.type === 'session.updated') {
+          console.info(
+            `[realtime] ${deviceProfile} audio input configured`,
+            realtimeAudioInputSummary(realtimeEvent),
+          );
           if (!greeted) {
             greeted = true;
             send(initialGreetingEvent);
           }
           setStatus('ready');
           return;
+        }
+
+        if (
+          realtimeEvent.type === 'input_audio_buffer.speech_started' ||
+          realtimeEvent.type === 'input_audio_buffer.speech_stopped'
+        ) {
+          console.info(`[realtime] ${realtimeEvent.type}`, {
+            deviceProfile,
+          });
         }
 
         if (realtimeEvent.type === 'error') {
@@ -285,7 +302,7 @@ export function useRealtimeShopping({
         setStatus('error');
       }
     }
-  }, [enabled, executeFunctionCall, userId]);
+  }, [deviceProfile, enabled, executeFunctionCall, userId]);
 
   useEffect(() => {
     const start = enabled ? setTimeout(() => void connect(), 0) : undefined;

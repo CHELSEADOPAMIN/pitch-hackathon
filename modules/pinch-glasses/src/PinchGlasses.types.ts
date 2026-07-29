@@ -5,20 +5,11 @@ export type PinchGlassesModuleEvents = {
 export type GlassesStatusEvent = {
   stage:
     | 'connecting'
-    | 'capturing'
-    | 'capturing-thumbnail'
-    | 'transferring'
-    | 'downloading'
-    | 'downloading-thumbnail'
     | 'ready'
-    | 'thumbnail-ready'
-    | 'probing-capability'
-    | 'starting-live'
-    | 'connecting-p2p'
-    | 'probing-rtsp'
-    | 'live-reachable'
-    | 'stopping-live'
-    | 'live-unsupported';
+    | 'capturing'
+    | 'transferring'
+    | 'disconnected'
+    | 'error';
   detail?: string;
 };
 
@@ -26,19 +17,21 @@ export type GlassesStatus = {
   available: boolean;
   permissionGranted: boolean;
   bonded: boolean;
+  connected: boolean;
   deviceName?: string;
   deviceAddress?: string;
+  negotiatedMtu?: number;
+  sessionAgeMs?: number;
+  connectionMs?: number;
 };
 
-export type GlassesPhoto = {
+export type GlassesThumbnailPhoto = {
   uri: string;
+  base64: string;
   width: number;
   height: number;
   fileName: string;
   deviceName: string;
-};
-
-export type GlassesThumbnailPhoto = GlassesPhoto & {
   qualityLevel: number;
   qualityName: string;
   byteCount: number;
@@ -54,21 +47,11 @@ export type GlassesThumbnailPhoto = GlassesPhoto & {
   commandResponseHex?: string;
 };
 
-export type GlassesLiveProbe = {
-  deviceName: string;
-  advertisedSupport?: boolean;
-  capabilityReceived: boolean;
-  capabilityRawHex?: string;
-  startAcknowledged?: boolean;
-  startErrorCode?: number;
-  liveNotificationType?: number;
-  glassesIp?: string;
-  p2pConnected: boolean;
-  tcpConnected: boolean;
-  rtspReachable: boolean;
-  rtspStatusLine?: string;
-  ipNotificationMs?: number;
-  rtspReadyMs?: number;
-  totalMs: number;
-  error?: string;
+export type AudioRoute = 'phone' | 'm02';
+
+export type AudioRouteStatus = {
+  requestedRoute?: AudioRoute;
+  selected: boolean;
+  deviceName?: string;
+  deviceType?: number;
 };
