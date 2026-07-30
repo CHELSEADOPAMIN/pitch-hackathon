@@ -37,6 +37,11 @@ export type GlassesThumbnailPhoto = {
   byteCount: number;
   packetCount: number;
   negotiatedMtu: number;
+  highPriorityRequested: boolean;
+  balancedPriorityRequested: boolean;
+  packetIntervalAverageMs?: number;
+  packetIntervalP95Ms?: number;
+  packetIntervalMaxMs?: number;
   connectionMs: number;
   shutterMs: number;
   firstChunkMs: number;

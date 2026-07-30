@@ -1,5 +1,6 @@
 package expo.modules.pinchglasses
 
+import android.util.Log
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -27,6 +28,10 @@ class PinchGlassesModule : Module() {
 
     AsyncFunction("captureThumbnailAsync") Coroutine { qualityLevel: Int ->
       client().captureThumbnail(qualityLevel)
+    }
+
+    Function("logTrace") { message: String ->
+      Log.i("PinchTrace", message.take(3_500))
     }
 
     AsyncFunction("setAudioRouteAsync") { route: String ->

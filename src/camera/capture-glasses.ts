@@ -76,5 +76,23 @@ export async function captureProductWithGlasses() {
   if (!result.base64) {
     throw new Error('The M02 returned a product photo without JPEG data.');
   }
+  console.info('[capture] M02 product photo ready.', {
+    qualityLevel: result.qualityLevel,
+    width: result.width,
+    height: result.height,
+    byteCount: result.byteCount,
+    packetCount: result.packetCount,
+    negotiatedMtu: result.negotiatedMtu,
+    highPriorityRequested: result.highPriorityRequested,
+    balancedPriorityRequested: result.balancedPriorityRequested,
+    packetIntervalAverageMs: result.packetIntervalAverageMs,
+    packetIntervalP95Ms: result.packetIntervalP95Ms,
+    packetIntervalMaxMs: result.packetIntervalMaxMs,
+    connectionMs: result.connectionMs,
+    shutterMs: result.shutterMs,
+    firstChunkMs: result.firstChunkMs,
+    transferMs: result.transferMs,
+    totalMs: result.totalMs,
+  });
   return result;
 }

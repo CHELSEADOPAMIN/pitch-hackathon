@@ -33,7 +33,9 @@ export function ActionButton({
       disabled={disabled || busy}
       onPress={onPress}
       className={`h-14 items-center justify-center rounded-full px-6 ${toneClasses[tone]} ${
-        disabled || busy ? 'opacity-40' : 'active:opacity-80'
+        disabled || busy
+          ? 'opacity-40'
+          : 'active:scale-[0.96] active:opacity-90'
       }`}
     >
       {busy ? (

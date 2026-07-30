@@ -6,6 +6,8 @@ import {
   initialGreetingEvent,
   parseRealtimeEvent,
   realtimeAudioInputSummary,
+  TOOL_PROGRESS_DELAY_MS,
+  toolProgressEvent,
 } from '../../src/realtime/protocol';
 import {
   shoppingSessionUpdate,
@@ -21,8 +23,7 @@ describe('Realtime protocol', () => {
         status: 'completed',
         name: 'shopping_agent',
         call_id: 'call_early',
-        arguments:
-          '{"request":"Add the product in view","needs_photo":true}',
+        arguments: '{"request":"Add the product in view","needs_photo":true}',
       },
     });
 
@@ -95,13 +96,71 @@ describe('Realtime protocol', () => {
       status: 'completed',
       facts: { priceCents: 390 },
     });
-    expect(events[1]).toEqual({ type: 'response.create' });
+    expect(events[1]).toMatchObject({
+      type: 'response.create',
+      response: {
+        metadata: {
+          response_purpose: 'shopping_result',
+          call_id: 'call_123',
+        },
+      },
+    });
+  });
+
+  it('creates one isolated audio response for a slow shopping tool', () => {
+    const event = toolProgressEvent('call_slow');
+
+    expect(TOOL_PROGRESS_DELAY_MS).toBe(7_000);
+    expect(event).toMatchObject({
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        input: [],
+        tools: [],
+        tool_choice: 'none',
+        output_modalities: ['audio'],
+        metadata: {
+          response_purpose: 'tool_progress',
+          call_id: 'call_slow',
+        },
+      },
+    });
   });
 
   it('ignores malformed data-channel messages without throwing', () => {
     expect(parseRealtimeEvent('{not-json')).toBeNull();
     expect(parseRealtimeEvent(new Uint8Array())).toBeNull();
     expect(parseRealtimeEvent('{"type":42}')).toBeNull();
+  });
+
+  it('keeps response metadata and playback response IDs for latency tracing', () => {
+    expect(
+      parseRealtimeEvent(
+        JSON.stringify({
+          type: 'response.created',
+          response: {
+            id: 'resp_result',
+            metadata: {
+              response_purpose: 'shopping_result',
+              call_id: 'call_123',
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      response: {
+        id: 'resp_result',
+        metadata: { call_id: 'call_123' },
+      },
+    });
+    expect(
+      parseRealtimeEvent(
+        JSON.stringify({
+          type: 'output_audio_buffer.stopped',
+          response_id: 'resp_result',
+        }),
+      ),
+    ).toMatchObject({ response_id: 'resp_result' });
   });
 
   it('configures one serial low-reasoning tool and an initial greeting', () => {

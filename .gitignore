@@ -6,6 +6,7 @@ node_modules/
 dist/
 coverage/
 web-build/
+artifacts/
 /android/
 /ios/
 modules/*/android/build/

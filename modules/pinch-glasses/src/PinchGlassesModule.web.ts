@@ -32,6 +32,10 @@ class PinchGlassesModule extends NativeModule<PinchGlassesModuleEvents> {
     throw new Error('M02 glasses capture is only available on Android.');
   }
 
+  logTrace(message: string): void {
+    console.info(`[PinchTrace] ${message}`);
+  }
+
   async setAudioRouteAsync(_route: AudioRoute): Promise<AudioRouteStatus> {
     throw new Error('Explicit audio routing is only available on Android.');
   }

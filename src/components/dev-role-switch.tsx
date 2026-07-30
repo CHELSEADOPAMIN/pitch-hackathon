@@ -5,10 +5,10 @@ import { useSessionStore } from '@/state/session-store';
 
 export function DevRoleSwitch({
   inverse = false,
-  target = 'Merchant',
+  target = 'Staff',
 }: {
   inverse?: boolean;
-  target?: 'Shopper' | 'Merchant';
+  target?: 'Shop' | 'Staff';
 }) {
   const switchRole = useSessionStore((state) => state.switchRole);
 
@@ -20,14 +20,14 @@ export function DevRoleSwitch({
     <Pressable
       accessibilityRole="button"
       onPress={switchRole}
-      className={`rounded-full border px-4 py-2 active:opacity-60 ${
+      className={`rounded-full border px-4 py-2 active:scale-[0.96] active:opacity-80 ${
         inverse ? 'border-paper/30' : 'border-ink/20'
       }`}
     >
       <Text
         className={`font-medium text-xs ${inverse ? 'text-paper' : 'text-ink'}`}
       >
-        {target} view
+        {target}
       </Text>
     </Pressable>
   );

@@ -42,8 +42,12 @@ describe('shared API contracts', () => {
         userId: 'user_1',
         request: 'The customer explicitly confirmed quote q_1',
         checkoutConfirmation: { quoteId: 'q_1', confirmed: true },
+        traceId: 'call_trace_123',
       }),
-    ).toMatchObject({ checkoutConfirmation: { confirmed: true } });
+    ).toMatchObject({
+      checkoutConfirmation: { confirmed: true },
+      traceId: 'call_trace_123',
+    });
   });
 
   it('rejects fractional cents in carts and orders', () => {

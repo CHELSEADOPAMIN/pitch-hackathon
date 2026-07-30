@@ -3,6 +3,7 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from 'expo-camera';
+import { useKeepAwake } from 'expo-keep-awake';
 import * as Linking from 'expo-linking';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -46,39 +47,46 @@ const statusCopy: Record<
   { eyebrow: string; title: string; detail: string }
 > = {
   idle: {
-    eyebrow: 'Voice paused',
-    title: 'Tap to talk',
-    detail: 'Look at a product, then start the conversation.',
+    eyebrow: 'Voice assistant',
+    title: 'Ready when you are',
+    detail: 'Tap once, then say what you want.',
   },
   connecting: {
     eyebrow: 'Connecting',
-    title: 'Opening the line',
-    detail: 'Starting a secure voice session.',
+    title: 'Starting voice',
+    detail: 'This should only take a moment.',
   },
   configuring: {
     eyebrow: 'Getting ready',
-    title: 'Learning the store',
-    detail: 'Loading the catalogue and shopping tools.',
+    title: 'Loading this store',
+    detail: 'Connecting products and checkout.',
   },
   ready: {
     eyebrow: 'Listening',
-    title: 'What would you like?',
-    detail: 'Try “add this”, “remove the milk”, or “what is in my cart?”',
+    title: 'What do you need?',
+    detail: 'Say “add this”, “what’s in my cart?” or “checkout”.',
   },
   working: {
-    eyebrow: 'Working',
-    title: 'Checking that',
-    detail: 'Identifying the product or updating your cart.',
+    eyebrow: 'In progress',
+    title: 'Working on it',
+    detail: 'You can keep shopping while this finishes.',
   },
   error: {
-    eyebrow: 'Voice offline',
-    title: 'Let’s reconnect',
-    detail: 'Keep the app in the foreground, then tap the voice button.',
+    eyebrow: 'Connection lost',
+    title: 'Start voice again',
+    detail: 'Check your connection, then tap the voice button.',
   },
 };
 
 function message(error: unknown) {
-  return error instanceof Error ? error.message : 'An unknown error occurred.';
+  return error instanceof Error
+    ? error.message
+    : 'Something went wrong. Try again.';
+}
+
+function KeepAwakeDuringVoiceSession() {
+  useKeepAwake('pinch-voice-session');
+  return null;
 }
 
 export function CustomerScreen({ session }: { session: LoginResponse }) {
@@ -125,14 +133,11 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             microphoneResult = await requestMicrophonePermission();
           }
           if (!microphoneResult.granted) {
-            throw new Error('Microphone permission is required for M02 voice.');
+            throw new Error('Allow microphone access to talk through M02.');
           }
-          const glassesPermissionGranted =
-            await requestGlassesPermissions();
+          const glassesPermissionGranted = await requestGlassesPermissions();
           if (!glassesPermissionGranted) {
-            throw new Error(
-              'Nearby-device permission is required to connect M02.',
-            );
+            throw new Error('Allow nearby-device access to connect M02.');
           }
           const connected = await connectGlasses();
           await selectCommunicationAudioRoute('m02');
@@ -153,7 +158,7 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
           }
           if (!cameraResult.granted || !microphoneResult.granted) {
             throw new Error(
-              'Camera and microphone permissions are required for Phone mode.',
+              'Allow camera and microphone access to use Phone mode.',
             );
           }
           await disconnectGlasses();
@@ -197,10 +202,12 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
       }
       if (event.stage === 'disconnected' || event.stage === 'error') {
         setGlassesStatus((current) => ({ ...current, connected: false }));
-        setDeviceError(event.detail ?? 'The M02 control connection closed.');
+        setDeviceError(event.detail ?? 'M02 disconnected. Connect it again.');
         setAudioRouteReady(false);
       } else if (event.stage === 'ready') {
-        void getGlassesStatus().then(setGlassesStatus).catch(() => undefined);
+        void getGlassesStatus()
+          .then(setGlassesStatus)
+          .catch(() => undefined);
       }
     });
     return () => subscription.remove();
@@ -299,12 +306,11 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
   }, [canAskAgain, configureProfile, profile]);
 
   const modeLabel =
-    profile === 'm02'
-      ? glassesStatus.deviceName ?? 'M02 glasses'
-      : 'Phone camera';
+    profile === 'm02' ? (glassesStatus.deviceName ?? 'M02') : 'Phone';
 
   return (
     <ScreenShell dark>
+      {voiceActive ? <KeepAwakeDuringVoiceSession /> : null}
       {profile === 'phone' && phonePermissionsGranted ? (
         <CameraView
           animateShutter={false}
@@ -336,15 +342,13 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
           {(
             [
               ['phone', 'Phone'],
-              ['m02', glassesStatus.deviceName ?? 'M02'],
+              ['m02', 'M02 glasses'],
             ] as const
           ).map(([value, label]) => (
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: profile === value }}
-              disabled={
-                realtime.status === 'working' || deviceConfiguring
-              }
+              disabled={realtime.status === 'working' || deviceConfiguring}
               key={value}
               onPress={() => switchProfile(value)}
               className={`flex-1 rounded-full px-4 py-3 ${
@@ -379,23 +383,23 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
               <View className="absolute inset-x-0 top-5 items-center">
                 <View className="rounded-full bg-ink/55 px-4 py-2">
                   <Text className="font-medium text-[10px] uppercase tracking-[2px] text-paper/75">
-                    Keep the product in view
+                    Point at one item
                   </Text>
                 </View>
               </View>
             </View>
           ) : (
             <View className="flex-1 items-center justify-center px-8">
-              <View className="w-full gap-3 rounded-[34px] border border-leaf/50 bg-ink/85 p-7">
-                <Text className="font-medium text-[10px] uppercase tracking-[2px] text-leaf">
-                  Glasses ready
+              <View className="w-full gap-3 rounded-[28px] border border-paper/10 bg-paper/[0.06] p-6">
+                <Text className="font-medium text-xs text-leaf">
+                  M02 connected
                 </Text>
-                <Text className="font-display text-4xl leading-10 text-paper">
-                  Look naturally.
+                <Text className="font-display text-[38px] leading-10 text-paper">
+                  Look at the item
                 </Text>
                 <Text className="font-sans text-sm leading-6 text-paper/60">
-                  {modeLabel} will take a Fine BLE photo only when the shopping
-                  assistant needs to identify “this”.
+                  Say “add this” and the glasses will take a photo
+                  automatically.
                 </Text>
               </View>
             </View>
@@ -405,18 +409,16 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             <View className="gap-5 rounded-[30px] border border-paper/15 bg-ink/95 p-6">
               <View className="gap-2">
                 <Text className="font-medium text-[10px] uppercase tracking-[2px] text-signal">
-                  {deviceConfiguring ? 'Connecting device' : 'Setup needed'}
+                  {deviceConfiguring ? 'Connecting' : 'Device setup'}
                 </Text>
                 <Text className="font-display text-4xl leading-10 text-paper">
-                  {profile === 'm02'
-                    ? 'Connect your glasses.'
-                    : 'Let the phone see and hear.'}
+                  {profile === 'm02' ? 'Connect M02' : 'Allow camera access'}
                 </Text>
                 <Text className="font-sans text-sm leading-6 text-paper/60">
                   {visibleError ??
                     (profile === 'm02'
-                      ? 'M02 must be paired for call audio and available over Bluetooth.'
-                      : 'Phone mode needs the camera and microphone.')}
+                      ? 'Pair M02 in Android Bluetooth settings, then try again.'
+                      : 'Phone mode uses the camera and microphone.')}
                 </Text>
               </View>
               <ActionButton
@@ -424,7 +426,7 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
                 onPress={retryDeviceSetup}
                 tone="signal"
               >
-                {canAskAgain ? 'Try device setup again' : 'Open settings'}
+                {canAskAgain ? 'Try again' : 'Open settings'}
               </ActionButton>
             </View>
           </View>
@@ -448,7 +450,7 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
               } ${
                 !deviceReady || !audioRouteReady || deviceConfiguring
                   ? 'opacity-40'
-                  : 'active:scale-95'
+                  : 'active:scale-[0.96]'
               }`}
             >
               <View className="flex-row items-center gap-1">
@@ -478,7 +480,7 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
           <View className="mt-4 flex-row items-center justify-between border-t border-paper/10 pt-3">
             <View>
               <Text className="font-medium text-[9px] uppercase tracking-[1.8px] text-paper/35">
-                Shopping as
+                Customer
               </Text>
               <Text className="font-sans text-sm text-paper/80">
                 {session.username}

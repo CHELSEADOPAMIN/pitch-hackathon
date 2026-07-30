@@ -12,7 +12,7 @@ const config = {
   owner,
   version: '0.1.0',
   orientation: 'portrait',
-  icon: './assets/images/icon.png',
+  icon: './assets/images/icon-final.png',
   scheme: process.env.EXPO_SCHEME ?? 'pinchvoice',
   userInterfaceStyle: 'light',
   android: {
@@ -20,17 +20,17 @@ const config = {
       process.env.EXPO_ANDROID_PACKAGE ?? 'com.konstruq.pinchvoiceshopping',
     permissions: ['CAMERA', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
     adaptiveIcon: {
-      backgroundColor: '#F4F0E6',
-      foregroundImage: './assets/images/android-icon-foreground.png',
-      backgroundImage: './assets/images/android-icon-background.png',
-      monochromeImage: './assets/images/android-icon-monochrome.png',
+      backgroundColor: '#141812',
+      foregroundImage: './assets/images/android-icon-foreground-final.png',
+      backgroundImage: './assets/images/android-icon-background-final.png',
+      monochromeImage: './assets/images/android-icon-monochrome-final.png',
     },
     predictiveBackGestureEnabled: false,
   },
   web: {
     bundler: 'metro',
     output: 'static',
-    favicon: './assets/images/favicon.png',
+    favicon: './assets/images/favicon-final.png',
   },
   plugins: [
     'expo-router',
@@ -39,7 +39,7 @@ const config = {
       'expo-camera',
       {
         cameraPermission:
-          'Allow Pinch Voice to see products you want to add or remove.',
+          'Allow Pinch Voice to use the camera to identify products.',
         microphonePermission:
           'Allow Pinch Voice to hear your shopping requests.',
         recordAudioAndroid: true,
@@ -51,8 +51,8 @@ const config = {
       'expo-splash-screen',
       {
         backgroundColor: '#141812',
-        image: './assets/images/splash-icon.png',
-        imageWidth: 76,
+        image: './assets/images/splash-icon-final.png',
+        imageWidth: 180,
       },
     ],
   ],

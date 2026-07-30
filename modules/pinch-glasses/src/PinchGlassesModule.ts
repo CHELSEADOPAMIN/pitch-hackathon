@@ -13,6 +13,7 @@ declare class PinchGlassesModule extends NativeModule<PinchGlassesModuleEvents> 
   connectAsync(): Promise<GlassesStatus>;
   disconnectAsync(): Promise<GlassesStatus>;
   captureThumbnailAsync(qualityLevel: number): Promise<GlassesThumbnailPhoto>;
+  logTrace(message: string): void;
   setAudioRouteAsync(route: AudioRoute): Promise<AudioRouteStatus>;
   clearAudioRouteAsync(): Promise<AudioRouteStatus>;
 }

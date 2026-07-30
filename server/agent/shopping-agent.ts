@@ -18,6 +18,23 @@ import {
   type AgentResult,
 } from '../domain/types';
 
+export const SHOPPING_AGENT_MAX_STEPS = 6;
+
+type ToolResultSummary = {
+  toolName: string;
+  output: unknown;
+};
+
+export function hasTerminalSearchFailure(
+  toolResults: readonly ToolResultSummary[],
+) {
+  return toolResults.some((toolResult) => {
+    if (toolResult.toolName !== 'search_products') return false;
+    const parsed = agentResultSchema.safeParse(toolResult.output);
+    return parsed.success && parsed.data.status === 'error';
+  });
+}
+
 export type ShoppingAgentDependencies = {
   repository: ShoppingRepository;
   checkout: CheckoutService;
@@ -53,7 +70,10 @@ export function createShoppingAgentRunner(
   const openai = createOpenAI({ apiKey: dependencies.openaiApiKey });
 
   return async (request: AgentRequest): Promise<AgentResult> => {
+    const startedAt = Date.now();
+    const catalogStartedAt = Date.now();
     const catalog = await dependencies.repository.listProducts();
+    const catalogMs = Date.now() - catalogStartedAt;
     const catalogText = catalog
       .map(
         (product) => `- ${product.id}: ${product.name}; ${product.description}`,
@@ -207,7 +227,7 @@ export function createShoppingAgentRunner(
       : domainTools;
 
     const agent = new ToolLoopAgent({
-      model: openai.responses('gpt-5.6-terra'),
+      model: openai.responses('gpt-5.6-sol'),
       instructions: shoppingAgentPrompt(catalogText),
       providerOptions: {
         openai: {
@@ -223,25 +243,61 @@ export function createShoppingAgentRunner(
           'prepare_checkout',
           'confirm_checkout',
         ),
-        isStepCount(20),
+        ({ steps }) =>
+          hasTerminalSearchFailure(steps[steps.length - 1]?.toolResults ?? []),
+        isStepCount(SHOPPING_AGENT_MAX_STEPS),
       ],
       toolChoice: 'auto',
       tools,
     });
 
+    const agentStartedAt = Date.now();
     const result = await agent.generate({
       messages: [shoppingModelMessage(request)],
     });
+    const agentMs = Date.now() - agentStartedAt;
     const toolResults = result.steps.flatMap((step) => step.toolResults);
     const lastOutput = toolResults.at(-1)?.output;
     const parsed = agentResultSchema.safeParse(lastOutput);
-    return parsed.success
+    const output: AgentResult = parsed.success
       ? parsed.data
       : { status: 'error', reason: 'no_domain_result' };
+
+    console.info(
+      JSON.stringify({
+        level: 'info',
+        event: 'shopping_agent_completed',
+        traceId: request.traceId,
+        totalMs: Date.now() - startedAt,
+        catalogMs,
+        agentMs,
+        hasImage: Boolean(request.imageBase64),
+        stepCount: result.steps.length,
+        reachedStepLimit: result.steps.length >= SHOPPING_AGENT_MAX_STEPS,
+        steps: result.steps.map((step) => ({
+          step: step.stepNumber + 1,
+          finishReason: step.finishReason,
+          tools: step.toolCalls.map((call) => call.toolName),
+          responseMs: step.performance.responseTimeMs,
+          toolMs: Object.values(step.performance.toolExecutionMs).reduce(
+            (total, duration) => total + duration,
+            0,
+          ),
+        })),
+        outcome:
+          output.status === 'completed'
+            ? output.action
+            : output.status === 'error'
+              ? output.reason
+              : output.status,
+      }),
+    );
+
+    return output;
   };
 }
 
-function shoppingAgentPrompt(catalog: string) {
+export function shoppingAgentPrompt(catalog: string) {
   return `You are the visual and transactional shopping agent. You see an optional image and receive a self-contained factual shopping request.
 
 Catalogue:
@@ -251,12 +307,15 @@ Rules:
 - Use tools for every domain outcome. Never answer with prose alone.
 - Product IDs must come from this catalogue, and authoritative names and prices must come from database tools.
 - Never infer a price from an image or label.
+- When the request says "this" or "that" with an image, identify the single product the customer is deliberately holding closest to the camera. Prefer the dominant hand-held foreground package and its visible brand and product wording.
+- Treat shelves, desk clutter, and every other product behind or beside the held foreground package as background. Never select a background product merely because its label is easier to read.
+- If no single held or dominant foreground product can be identified, do not guess a background item. Report ambiguity only when two or more catalogue products are genuinely plausible for the intended foreground target.
 - For adding a clearly identified product, call add_to_cart.
 - Negative intent such as "I don't want X anymore", "take X out", "remove X", or "not X" is always a removal, never an add.
 - For a removal, map the named item to the catalogue and call remove_from_cart. If the cart reference is unclear, call get_cart first, then remove only the item the customer identified.
 - For cart reads and checkout, use their corresponding tools.
 - If two or more catalogue products are plausible, do not guess: call report_ambiguity with only those candidate IDs.
-- If no catalogue item matches, call search_products once with the best factual description. Its no-match error is the final result.
+- If no catalogue item matches, call search_products exactly once with the best factual description. Its no-match error is the final result and must not be retried.
 - A checkout request without explicit quote confirmation must only call prepare_checkout.
 - When an explicit confirmed quote is present, call confirm_checkout immediately and do not call another tool first.
 - confirm_checkout is available only when the request carries explicit server-validated confirmation. Never substitute another quote ID.

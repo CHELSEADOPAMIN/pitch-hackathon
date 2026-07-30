@@ -12,9 +12,12 @@ export type RealtimeFunctionCall = {
 type RealtimeResponseDone = {
   type?: string;
   item?: unknown;
+  response_id?: string;
   response?: {
+    id?: string;
     status?: string;
     output?: unknown[];
+    metadata?: Record<string, string>;
   };
 };
 
@@ -53,11 +56,14 @@ const realtimeEventSchema = z
       .optional(),
     response: z
       .object({
+        id: z.string().optional(),
         status: z.string().optional(),
         output: z.array(z.unknown()).optional(),
+        metadata: z.record(z.string(), z.string()).optional(),
       })
       .passthrough()
       .optional(),
+    response_id: z.string().optional(),
     item: z.unknown().optional(),
     error: z
       .object({
@@ -132,8 +138,38 @@ export function functionCallOutputEvents(callId: string, result: AgentResult) {
         output: JSON.stringify(result),
       },
     },
-    { type: 'response.create' },
+    {
+      type: 'response.create',
+      response: {
+        metadata: {
+          response_purpose: 'shopping_result',
+          call_id: callId,
+        },
+      },
+    },
   ] as const;
+}
+
+export const TOOL_PROGRESS_DELAY_MS = 7_000;
+
+export function toolProgressEvent(callId: string) {
+  return {
+    type: 'response.create',
+    response: {
+      conversation: 'none',
+      input: [],
+      instructions:
+        'Say exactly: "Still working. One moment." Do not say anything else.',
+      tools: [],
+      tool_choice: 'none',
+      output_modalities: ['audio'],
+      max_output_tokens: 64,
+      metadata: {
+        response_purpose: 'tool_progress',
+        call_id: callId,
+      },
+    },
+  } as const;
 }
 
 export const initialGreetingEvent = {

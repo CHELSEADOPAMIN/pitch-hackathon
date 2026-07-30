@@ -42,6 +42,10 @@ export const agentRequestSchema = z.object({
   request: z.string().trim().min(1),
   imageBase64: z.string().min(1).optional(),
   checkoutConfirmation: checkoutConfirmationSchema.optional(),
+  traceId: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]{8,100}$/)
+    .optional(),
 });
 
 export const completedAgentResultSchema = z.object({
