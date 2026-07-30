@@ -17,10 +17,10 @@ const requiredServerKeys = [
 
 const glassesIdentity = {
   EXPO_OWNER: 'crokily',
-  EXPO_APP_NAME: 'Pinch Glasses',
-  EXPO_APP_SLUG: 'pinch-voice-shopping-glasses',
-  EXPO_SCHEME: 'pinchvoiceglasses',
-  EXPO_ANDROID_PACKAGE: 'au.com.crokily.pinchvoice.glasses',
+  EXPO_APP_NAME: 'Pinch M02 Lab',
+  EXPO_APP_SLUG: 'pinch-m02-warmup-lab',
+  EXPO_SCHEME: 'pinchm02lab',
+  EXPO_ANDROID_PACKAGE: 'au.com.crokily.pinchvoice.glasses.warmup',
   EXPO_EAS_PROJECT_ID: '2dc66597-70dc-4317-b003-95f3ed58fea1',
 } as const;
 

@@ -52,6 +52,9 @@ internal class M02GlassesClient(
     private const val actionDeviceNotification = 0x73
     private const val actionPictureThumbnail = 0xFD
     private const val logTag = "PinchGlasses"
+    private const val postAudioPrioritySettleMs = 450L
+    private const val slowThumbnailChunkThresholdMs = 800L
+    private const val slowThumbnailDetectionPackets = 3
   }
 
   private val operationMutex = Mutex()
@@ -123,6 +126,39 @@ internal class M02GlassesClient(
     emitStatus("disconnected", "M02 control connection closed.")
     status()
   }
+
+  suspend fun prepareForRealtime(): Map<String, Any?> =
+    operationMutex.withLock {
+      checkBluetoothPermission()
+      val ble = activeBle?.takeIf { it.isConnected }
+        ?: error(
+          "The M02 control session is not connected. Connect the glasses before preparing Realtime.",
+        )
+      val startedAt = SystemClock.elapsedRealtime()
+      val highPriorityRequested = ble.requestConnectionPriority(
+        BluetoothGatt.CONNECTION_PRIORITY_HIGH,
+      )
+      Log.i(
+        logTag,
+        "M02 post-audio connection priority HIGH requested=$highPriorityRequested " +
+          "mtu=${ble.negotiatedMtu}",
+      )
+
+      // The request is asynchronous. Give Android a short bounded head start
+      // before WebRTC opens its SCO stream; the remaining negotiation overlaps
+      // with Realtime setup and the user's first utterance.
+      delay(postAudioPrioritySettleMs)
+      val warmupMs = SystemClock.elapsedRealtime() - startedAt
+      Log.i(
+        logTag,
+        "M02 post-audio transport preparation complete warmupMs=$warmupMs",
+      )
+      mapOf(
+        "highPriorityRequested" to highPriorityRequested,
+        "negotiatedMtu" to ble.negotiatedMtu,
+        "warmupMs" to warmupMs,
+      )
+    }
 
   fun close() {
     closeSession()
@@ -230,8 +266,11 @@ internal class M02GlassesClient(
         var previousPacketAt: Long? = null
         val packetIntervalsMs = mutableListOf<Long>()
         val imageBytes = ByteArrayOutputStream()
+        var highPriorityRefreshRequested: Boolean? = null
+        var firstSlowChunkMs: Long? = null
 
         while (true) {
+          val chunkRequestedAt = SystemClock.elapsedRealtime()
           ble.writeFast(
             actionPictureThumbnail,
             byteArrayOf(
@@ -244,6 +283,7 @@ internal class M02GlassesClient(
             ble.awaitFrame(actionPictureThumbnail)
           }
           val packetReceivedAt = SystemClock.elapsedRealtime()
+          val chunkRoundTripMs = packetReceivedAt - chunkRequestedAt
           previousPacketAt?.let {
             packetIntervalsMs += packetReceivedAt - it
           }
@@ -267,6 +307,22 @@ internal class M02GlassesClient(
           expectedTotal = total
           if (firstChunkAt == null) {
             firstChunkAt = packetReceivedAt
+          }
+          if (
+            highPriorityRefreshRequested == null &&
+            expectedIndex < slowThumbnailDetectionPackets &&
+            chunkRoundTripMs >= slowThumbnailChunkThresholdMs
+          ) {
+            firstSlowChunkMs = chunkRoundTripMs
+            highPriorityRefreshRequested = ble.requestConnectionPriority(
+              BluetoothGatt.CONNECTION_PRIORITY_HIGH,
+            )
+            Log.w(
+              logTag,
+              "M02 slow thumbnail chunk detected index=$expectedIndex " +
+                "roundTripMs=$chunkRoundTripMs priorityRefreshRequested=" +
+                highPriorityRefreshRequested,
+            )
           }
           imageBytes.write(frame, 11, frame.size - 11)
           expectedIndex += 1
@@ -313,7 +369,8 @@ internal class M02GlassesClient(
             "${requireNotNull(thumbnailReadyAt) - commandStartedAt} " +
             "transferMs=${finishedAt - transferStartedAt} " +
             "packetAvgMs=$packetIntervalAverageMs packetP95Ms=$packetIntervalP95Ms " +
-            "packetMaxMs=$packetIntervalMaxMs",
+            "packetMaxMs=$packetIntervalMaxMs priorityRefreshRequested=" +
+            "$highPriorityRefreshRequested firstSlowChunkMs=$firstSlowChunkMs",
         )
         emitStatus(
           "ready",
@@ -332,6 +389,8 @@ internal class M02GlassesClient(
           "packetCount" to requireNotNull(expectedTotal),
           "negotiatedMtu" to ble.negotiatedMtu,
           "highPriorityRequested" to highPriorityRequested,
+          "highPriorityRefreshRequested" to highPriorityRefreshRequested,
+          "firstSlowChunkMs" to firstSlowChunkMs,
           "packetIntervalAverageMs" to packetIntervalAverageMs,
           "packetIntervalP95Ms" to packetIntervalP95Ms,
           "packetIntervalMaxMs" to packetIntervalMaxMs,

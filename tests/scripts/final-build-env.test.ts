@@ -24,7 +24,7 @@ describe('final Android build environment', () => {
       EXPO_PUBLIC_API_URL: 'https://pinch.example.test',
       EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY: 'pk_test_demo',
       EXPO_PUBLIC_ENABLE_DEMO_CONTROLS: '1',
-      EXPO_ANDROID_PACKAGE: 'au.com.crokily.pinchvoice.glasses',
+      EXPO_ANDROID_PACKAGE: 'au.com.crokily.pinchvoice.glasses.warmup',
       PINCH_FINAL_BUILD: '1',
     });
   });

@@ -26,6 +26,10 @@ class PinchGlassesModule : Module() {
       client().disconnect()
     }
 
+    AsyncFunction("prepareForRealtimeAsync") Coroutine { ->
+      client().prepareForRealtime()
+    }
+
     AsyncFunction("captureThumbnailAsync") Coroutine { qualityLevel: Int ->
       client().captureThumbnail(qualityLevel)
     }

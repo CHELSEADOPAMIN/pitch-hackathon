@@ -20,17 +20,18 @@ if (process.env.PINCH_FINAL_BUILD === '1') {
 }
 
 const config = {
-  name: process.env.EXPO_APP_NAME ?? 'Pinch Voice',
-  slug: process.env.EXPO_APP_SLUG ?? 'pinch-voice-shopping',
+  name: process.env.EXPO_APP_NAME ?? 'Pinch M02 Lab',
+  slug: process.env.EXPO_APP_SLUG ?? 'pinch-m02-warmup-lab',
   owner,
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon-final.png',
-  scheme: process.env.EXPO_SCHEME ?? 'pinchvoice',
+  scheme: process.env.EXPO_SCHEME ?? 'pinchm02lab',
   userInterfaceStyle: 'light',
   android: {
     package:
-      process.env.EXPO_ANDROID_PACKAGE ?? 'com.konstruq.pinchvoiceshopping',
+      process.env.EXPO_ANDROID_PACKAGE ??
+      'au.com.crokily.pinchvoice.glasses.warmup',
     permissions: ['CAMERA', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
     adaptiveIcon: {
       backgroundColor: '#141812',

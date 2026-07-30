@@ -52,6 +52,10 @@ export function disconnectGlasses(): Promise<GlassesStatus> {
   return PinchGlasses.disconnectAsync();
 }
 
+export function prepareGlassesForRealtime() {
+  return PinchGlasses.prepareForRealtimeAsync();
+}
+
 export function subscribeToGlassesStatus(
   listener: (event: GlassesStatusEvent) => void,
 ) {
@@ -84,6 +88,8 @@ export async function captureProductWithGlasses() {
     packetCount: result.packetCount,
     negotiatedMtu: result.negotiatedMtu,
     highPriorityRequested: result.highPriorityRequested,
+    highPriorityRefreshRequested: result.highPriorityRefreshRequested,
+    firstSlowChunkMs: result.firstSlowChunkMs,
     packetIntervalAverageMs: result.packetIntervalAverageMs,
     packetIntervalP95Ms: result.packetIntervalP95Ms,
     packetIntervalMaxMs: result.packetIntervalMaxMs,

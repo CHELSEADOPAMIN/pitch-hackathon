@@ -3,6 +3,7 @@ import { registerWebModule, NativeModule } from 'expo';
 import {
   type AudioRoute,
   type AudioRouteStatus,
+  type GlassesRealtimePreparation,
   type GlassesStatus,
   type GlassesThumbnailPhoto,
   type PinchGlassesModuleEvents,
@@ -24,6 +25,10 @@ class PinchGlassesModule extends NativeModule<PinchGlassesModuleEvents> {
 
   async disconnectAsync(): Promise<GlassesStatus> {
     return this.getStatusAsync();
+  }
+
+  async prepareForRealtimeAsync(): Promise<GlassesRealtimePreparation> {
+    throw new Error('M02 glasses are only available on Android.');
   }
 
   async captureThumbnailAsync(
