@@ -35,21 +35,22 @@ export function LoginScreen() {
       <KeyboardAvoidingView className="flex-1 justify-between px-6 pb-7 pt-5">
         <BrandMark />
 
-        <View className="gap-7">
+        <View className="gap-8">
           <View className="gap-3">
-            <Text className="font-display text-[58px] leading-[55px] text-ink">
-              See it.
-              {'\n'}Say it. Shop.
+            <Text className="font-medium text-[10px] uppercase tracking-[2px] text-signal">
+              Voice checkout
+            </Text>
+            <Text className="font-display text-[52px] leading-[50px] text-ink">
+              Start shopping
             </Text>
             <Text className="max-w-[310px] font-sans text-base leading-6 text-ink/60">
-              Tell us your name first. A merchant can use it to find your paid
-              order when you leave.
+              Enter your name so staff can find your paid order.
             </Text>
           </View>
 
           <View className="gap-3">
-            <Text className="ml-5 font-medium text-[11px] uppercase tracking-[2px] text-ink/45">
-              Your name
+            <Text className="ml-5 font-medium text-xs text-ink/55">
+              Name for pickup
             </Text>
             <TextInput
               autoCapitalize="none"
@@ -57,7 +58,7 @@ export function LoginScreen() {
               maxLength={40}
               onChangeText={setUsername}
               onSubmitEditing={() => login.mutate()}
-              placeholder="For example, Chelsea"
+              placeholder="Chelsea"
               placeholderTextColor="#8D8B82"
               returnKeyType="go"
               value={username}
@@ -76,11 +77,11 @@ export function LoginScreen() {
               disabled={username.trim().length < 2}
               onPress={() => login.mutate()}
             >
-              Enter the store
+              Continue
             </ActionButton>
             {demoControlsEnabled() ? (
               <ActionButton onPress={() => setRole('staff')} tone="light">
-                Open merchant dashboard
+                Open staff orders
               </ActionButton>
             ) : null}
           </View>
@@ -88,7 +89,7 @@ export function LoginScreen() {
 
         <View className="self-start">
           <Text className="font-sans text-xs leading-5 text-ink/40">
-            Hackathon demo · No password required
+            Demo store · No password
           </Text>
         </View>
       </KeyboardAvoidingView>

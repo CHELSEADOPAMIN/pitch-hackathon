@@ -26,6 +26,24 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "glasses-preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_DEMO_CONTROLS": "1",
+        "EXPO_PUBLIC_API_URL": "https://aisho-codex.claw.a2a.ing",
+        "EXPO_OWNER": "crokily",
+        "EXPO_APP_NAME": "Pinch Glasses",
+        "EXPO_APP_SLUG": "pinch-voice-shopping-glasses",
+        "EXPO_SCHEME": "pinchvoiceglasses",
+        "EXPO_ANDROID_PACKAGE": "au.com.crokily.pinchvoice.glasses",
+        "EXPO_EAS_PROJECT_ID": "2dc66597-70dc-4317-b003-95f3ed58fea1"
+      },
+      "node": "22.16.0",
+      "android": {
+        "buildType": "apk"
+      }
     }
   }
 }

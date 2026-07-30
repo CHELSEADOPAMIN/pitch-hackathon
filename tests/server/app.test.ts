@@ -16,6 +16,16 @@ const USER: User = {
 };
 
 describe('Hono API contracts', () => {
+  it('serves the staff dashboard from the API host', async () => {
+    const response = await createApp(createDependencies()).request('/staff');
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(html).toContain('<title>Pinch Staff Orders</title>');
+    expect(html).toContain('fetch("/api/orders"');
+  });
+
   it('checks database and Pinch health', async () => {
     const dependencies = createDependencies();
     const response = await createApp(dependencies).request('/api/health');
@@ -125,6 +135,33 @@ describe('Hono API contracts', () => {
     expect(dependencies.realtime.createClientSecret).toHaveBeenCalledWith(
       USER.id,
     );
+  });
+
+  it('echoes the shopping correlation ID and passes the trace into the agent', async () => {
+    const dependencies = createDependencies();
+    const consoleInfo = vi
+      .spyOn(console, 'info')
+      .mockImplementation(() => undefined);
+    const response = await createApp(dependencies).request('/api/agent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-correlation-id': 'call_trace_123',
+      },
+      body: JSON.stringify({
+        userId: USER.id,
+        request: 'Add this product',
+        traceId: 'call_trace_123',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-correlation-id')).toBe('call_trace_123');
+    expect(dependencies.runShoppingAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ traceId: 'call_trace_123' }),
+    );
+    expect(consoleInfo).toHaveBeenCalledTimes(2);
+    consoleInfo.mockRestore();
   });
 
   it('serializes paid orders with an ISO timestamp', async () => {

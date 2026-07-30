@@ -57,13 +57,13 @@ describeDatabase('Supabase schema and seed', () => {
     ]);
   });
 
-  it('has 5–10 seeded products with integer-cent prices', async () => {
+  it('has a practical seeded catalogue with integer-cent prices', async () => {
     const products = await sql<{ price_cents: number }[]>`
       select price_cents from ${sql(databaseSchema)}.products
     `;
 
-    expect(products.length).toBeGreaterThanOrEqual(5);
-    expect(products.length).toBeLessThanOrEqual(10);
+    expect(products.length).toBeGreaterThanOrEqual(15);
+    expect(products.length).toBeLessThanOrEqual(30);
     expect(
       products.every(
         ({ price_cents }) => Number.isInteger(price_cents) && price_cents >= 0,

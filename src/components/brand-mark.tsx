@@ -1,25 +1,25 @@
-import { Text, View } from 'react-native';
+import { Image, Text, View } from 'react-native';
 
 export function BrandMark({ inverse = false }: { inverse?: boolean }) {
   return (
-    <View className="flex-row items-center gap-3">
+    <View className="flex-row items-center gap-2.5">
       <View
-        className={`h-9 w-9 items-center justify-center rounded-full ${
-          inverse ? 'bg-paper' : 'bg-ink'
+        className={`h-9 w-12 items-center justify-center rounded-xl ${
+          inverse ? 'bg-paper/10' : 'bg-ink'
         }`}
       >
-        <View
-          className={`h-3 w-3 rounded-full ${
-            inverse ? 'bg-signal' : 'bg-paper'
-          }`}
+        <Image
+          resizeMode="contain"
+          source={require('../../assets/images/generated/pinch-voice-mark-flat.png')}
+          style={{ height: 22, width: 42 }}
         />
       </View>
       <Text
-        className={`font-medium text-[12px] uppercase tracking-[3px] ${
+        className={`font-medium text-[12px] uppercase tracking-[2.4px] ${
           inverse ? 'text-paper' : 'text-ink'
         }`}
       >
-        Pinch Voice
+        Pinch
       </Text>
     </View>
   );

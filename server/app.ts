@@ -20,6 +20,7 @@ import type {
   OpenAIRealtimeClient,
   RealtimeSecret,
 } from './integrations/realtime';
+import { staffPageHtml } from './staff-page';
 
 export type ServerDependencies = {
   repository: ShoppingRepository;
@@ -67,6 +68,7 @@ export function createApp(dependencies: ServerDependencies) {
         ok ? 200 : 503,
       );
     })
+    .get('/staff', (context) => context.html(staffPageHtml))
     .post(
       '/api/login',
       zValidator('json', loginRequestSchema),
@@ -154,10 +156,37 @@ export function createApp(dependencies: ServerDependencies) {
       zValidator('json', agentRequestSchema),
       async (context) => {
         const correlationId = beginRequest(context);
+        const startedAt = Date.now();
+        const input = context.req.valid('json');
+        console.info(
+          JSON.stringify({
+            level: 'info',
+            event: 'agent_http_started',
+            correlationId,
+            traceId: input.traceId,
+            hasImage: Boolean(input.imageBase64),
+            imageBase64Chars: input.imageBase64?.length ?? 0,
+            requestChars: input.request.length,
+          }),
+        );
         try {
-          return context.json(
-            await dependencies.runShoppingAgent(context.req.valid('json')),
+          const result = await dependencies.runShoppingAgent(input);
+          console.info(
+            JSON.stringify({
+              level: 'info',
+              event: 'agent_http_completed',
+              correlationId,
+              traceId: input.traceId,
+              totalMs: Date.now() - startedAt,
+              outcome:
+                result.status === 'completed'
+                  ? result.action
+                  : result.status === 'error'
+                    ? result.reason
+                    : result.status,
+            }),
           );
+          return context.json(result);
         } catch (error) {
           logRouteError('/api/agent', 500, correlationId, error);
           return context.json({

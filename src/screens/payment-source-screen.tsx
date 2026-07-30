@@ -149,20 +149,22 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
 
           <View className="my-10 gap-8">
             <View className="gap-3">
-              <Text className="font-display text-[52px] leading-[50px] text-paper">
-                Save once.
-                {'\n'}Then just talk.
+              <Text className="font-medium text-[10px] uppercase tracking-[2px] text-signal">
+                Payment
+              </Text>
+              <Text className="font-display text-[48px] leading-[47px] text-paper">
+                Add a test card
               </Text>
               <Text className="font-sans text-sm leading-6 text-paper/55">
-                Card details go directly from this phone to Pinch. They never
-                pass through our server.
+                Your card details go straight to Pinch and never pass through
+                this app’s server.
               </Text>
             </View>
 
             <View className="gap-6 rounded-[28px] border border-paper/15 bg-paper/[0.04] p-6">
               <View className="flex-row items-center justify-between">
                 <Text className="font-medium text-xs uppercase tracking-[2px] text-paper/50">
-                  Sandbox card
+                  Test card
                 </Text>
                 <View className="h-3 w-7 rounded-full bg-signal" />
               </View>
@@ -232,13 +234,13 @@ export function PaymentSourceScreen({ session }: { session: LoginResponse }) {
               onPress={() => bindCard.mutate()}
               tone="signal"
             >
-              Save test card
+              Save card
             </ActionButton>
           </View>
 
           <View className="flex-row items-center justify-between">
             <Text className="font-sans text-xs leading-5 text-paper/35">
-              Test environment · Pinch sandbox cards only
+              Pinch sandbox · No real charge
             </Text>
             {demoControlsEnabled() ? (
               <Pressable

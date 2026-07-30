@@ -12,14 +12,19 @@ import {
   realtimeTokenResponseSchema,
 } from '@/contracts/api';
 import { api, readJson } from '@/lib/api';
+import { logDiagnosticEvent } from '@/lib/diagnostic-log';
 import {
   completedShoppingCalls,
   functionCallOutputEvents,
   initialGreetingEvent,
   parseRealtimeEvent,
+  realtimeAudioInputSummary,
+  TOOL_PROGRESS_DELAY_MS,
+  toolProgressEvent,
   type RealtimeFunctionCall,
 } from '@/realtime/protocol';
-import { shoppingSessionUpdate } from '@/realtime/session-config';
+import { shoppingSessionUpdateFor } from '@/realtime/session-config';
+import type { DeviceProfile } from '@/state/device-profile-store';
 
 const shoppingToolArgumentsSchema = z.object({
   request: z.string().min(1),
@@ -34,6 +39,25 @@ const shoppingToolArgumentsSchema = z.object({
 
 type DataChannel = ReturnType<RTCPeerConnection['createDataChannel']>;
 
+type ShoppingCallTrace = {
+  callId: string;
+  toolCallReceivedAt: number;
+  speechStartedAt?: number;
+  speechStoppedAt?: number;
+  executionStartedAt?: number;
+  toolResultSentAt?: number;
+};
+
+type RealtimeResponseTrace = {
+  callId: string;
+  purpose: string;
+};
+
+type PendingRemoteDescription = {
+  peer: RTCPeerConnection;
+  promise: Promise<void>;
+};
+
 export type RealtimeStatus =
   'idle' | 'connecting' | 'configuring' | 'ready' | 'working' | 'error';
 
@@ -41,6 +65,7 @@ type UseRealtimeShoppingOptions = {
   userId: string;
   enabled: boolean;
   capture: () => Promise<string>;
+  deviceProfile: DeviceProfile;
 };
 
 function errorMessage(error: unknown) {
@@ -51,6 +76,7 @@ export function useRealtimeShopping({
   userId,
   enabled,
   capture,
+  deviceProfile,
 }: UseRealtimeShoppingOptions) {
   const [status, setStatus] = useState<RealtimeStatus>('idle');
   const [error, setError] = useState<string>();
@@ -60,23 +86,66 @@ export function useRealtimeShopping({
   const handledCallsRef = useRef(new Set<string>());
   const toolQueueRef = useRef<Promise<void>>(Promise.resolve());
   const connectionAttemptRef = useRef(0);
+  const callTracesRef = useRef(new Map<string, ShoppingCallTrace>());
+  const responseTracesRef = useRef(new Map<string, RealtimeResponseTrace>());
+  const lastSpeechStartedAtRef = useRef<number | undefined>(undefined);
+  const lastSpeechStoppedAtRef = useRef<number | undefined>(undefined);
+  const handshakeAbortRef = useRef<{
+    attempt: number;
+    controller: AbortController;
+  } | null>(null);
+  const pendingRemoteDescriptionRef = useRef<PendingRemoteDescription | null>(
+    null,
+  );
 
-  const disconnect = useCallback((resetStatus = true) => {
-    connectionAttemptRef.current += 1;
-    peerRef.current?.close();
-    peerRef.current = null;
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-    remoteStreamRef.current = null;
-    handledCallsRef.current.clear();
-    if (resetStatus) setStatus('idle');
+  const closePeerSafely = useCallback((peer: RTCPeerConnection) => {
+    const pending = pendingRemoteDescriptionRef.current;
+    if (pending?.peer !== peer) {
+      peer.close();
+      return;
+    }
+
+    // react-native-webrtc can crash natively if close() races an in-flight
+    // setRemoteDescription(). Defer disposal until that native call settles.
+    void pending.promise
+      .catch(() => undefined)
+      .then(() => {
+        if (pendingRemoteDescriptionRef.current === pending) {
+          pendingRemoteDescriptionRef.current = null;
+        }
+        peer.close();
+      });
   }, []);
+
+  const disconnect = useCallback(
+    (resetStatus = true) => {
+      connectionAttemptRef.current += 1;
+      handshakeAbortRef.current?.controller.abort();
+      handshakeAbortRef.current = null;
+      const peer = peerRef.current;
+      peerRef.current = null;
+      if (peer) {
+        closePeerSafely(peer);
+      }
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+      remoteStreamRef.current = null;
+      handledCallsRef.current.clear();
+      callTracesRef.current.clear();
+      responseTracesRef.current.clear();
+      lastSpeechStartedAtRef.current = undefined;
+      lastSpeechStoppedAtRef.current = undefined;
+      if (resetStatus) setStatus('idle');
+    },
+    [closePeerSafely],
+  );
 
   const executeFunctionCall = useCallback(
     async (
       call: RealtimeFunctionCall,
       attempt: number,
       channel: DataChannel,
+      trace: ShoppingCallTrace,
     ) => {
       if (
         connectionAttemptRef.current !== attempt ||
@@ -84,39 +153,147 @@ export function useRealtimeShopping({
       ) {
         return;
       }
-      if (handledCallsRef.current.has(call.call_id)) {
-        return;
-      }
-
-      handledCallsRef.current.add(call.call_id);
       setStatus('working');
 
+      const startedAt = Date.now();
+      trace.executionStartedAt = startedAt;
+      logDiagnosticEvent('shopping_tool_execution_started', {
+        callId: call.call_id,
+        deviceProfile,
+        queueMs: startedAt - trace.toolCallReceivedAt,
+        speechStoppedToExecutionMs: trace.speechStoppedAt
+          ? startedAt - trace.speechStoppedAt
+          : undefined,
+      });
+
+      let captureStartedAt: number | undefined;
+      let agentStartedAt: number | undefined;
+      let captureMs = 0;
+      let agentMs = 0;
+      let currentStage = 'arguments';
+      let progressTimer: ReturnType<typeof setTimeout> | undefined;
       let output: AgentResult;
       try {
         const input = shoppingToolArgumentsSchema.parse(
           JSON.parse(call.arguments),
         );
+
+        currentStage = 'capture';
+        captureStartedAt = input.needs_photo ? Date.now() : undefined;
+        if (captureStartedAt !== undefined) {
+          logDiagnosticEvent('shopping_capture_started', {
+            callId: call.call_id,
+            deviceProfile,
+          });
+        }
         const imageBase64 = input.needs_photo ? await capture() : undefined;
-        const response = await api.api.agent.$post({
-          json: {
-            userId,
-            request: input.request,
-            imageBase64,
-            checkoutConfirmation: input.checkout_confirmation
-              ? {
-                  quoteId: input.checkout_confirmation.quote_id,
-                  confirmed: true,
-                }
-              : undefined,
+        if (captureStartedAt !== undefined) {
+          captureMs = Date.now() - captureStartedAt;
+          logDiagnosticEvent('shopping_capture_completed', {
+            callId: call.call_id,
+            deviceProfile,
+            captureMs,
+            imageBase64Chars: imageBase64?.length ?? 0,
+          });
+        }
+
+        currentStage = 'agent_http';
+        agentStartedAt = Date.now();
+        logDiagnosticEvent('shopping_agent_http_started', {
+          callId: call.call_id,
+          hasImage: Boolean(imageBase64),
+          imageBase64Chars: imageBase64?.length ?? 0,
+        });
+        const progressTimerStartedAt = agentStartedAt;
+        // M02 sends its photo over BLE while Realtime audio uses Bluetooth SCO.
+        // Starting this timer before capture can make the progress speech steal
+        // bandwidth from an active photo transfer and stretch it past a minute.
+        progressTimer = setTimeout(() => {
+          if (
+            connectionAttemptRef.current !== attempt ||
+            channel.readyState !== 'open'
+          ) {
+            return;
+          }
+          try {
+            channel.send(JSON.stringify(toolProgressEvent(call.call_id)));
+            logDiagnosticEvent('shopping_progress_response_requested', {
+              callId: call.call_id,
+              elapsedMs: Date.now() - startedAt,
+              agentElapsedMs: Date.now() - progressTimerStartedAt,
+            });
+          } catch (cause) {
+            console.warn(
+              '[shopping] Could not send pending-tool progress update.',
+              errorMessage(cause),
+            );
+          }
+        }, TOOL_PROGRESS_DELAY_MS);
+        const response = await api.api.agent.$post(
+          {
+            json: {
+              userId,
+              request: input.request,
+              imageBase64,
+              checkoutConfirmation: input.checkout_confirmation
+                ? {
+                    quoteId: input.checkout_confirmation.quote_id,
+                    confirmed: true,
+                  }
+                : undefined,
+              traceId: call.call_id,
+            },
           },
+          {
+            headers: {
+              'x-correlation-id': call.call_id,
+            },
+          },
+        );
+        const responseHeadersAt = Date.now();
+        logDiagnosticEvent('shopping_agent_http_headers_received', {
+          callId: call.call_id,
+          correlationId:
+            response.headers.get('x-correlation-id') ?? call.call_id,
+          httpStatus: response.status,
+          headersMs: responseHeadersAt - agentStartedAt,
         });
         output = await readJson(response, agentResultSchema);
+        agentMs = Date.now() - agentStartedAt;
       } catch (cause) {
+        logDiagnosticEvent('shopping_tool_execution_failed', {
+          callId: call.call_id,
+          stage: currentStage,
+          elapsedMs: Date.now() - startedAt,
+          error: errorMessage(cause),
+        });
         output = {
           status: 'error',
           reason: errorMessage(cause),
         };
+      } finally {
+        if (progressTimer) clearTimeout(progressTimer);
+        if (captureStartedAt !== undefined && captureMs === 0) {
+          captureMs = Date.now() - captureStartedAt;
+        }
+        if (agentStartedAt !== undefined && agentMs === 0) {
+          agentMs = Date.now() - agentStartedAt;
+        }
       }
+
+      logDiagnosticEvent('shopping_tool_completed', {
+        callId: call.call_id,
+        deviceProfile,
+        captureMs,
+        agentMs,
+        totalMs: Date.now() - startedAt,
+        outcome:
+          output.status === 'completed'
+            ? output.action
+            : output.status === 'error'
+              ? output.reason
+              : output.status,
+      });
 
       if (
         connectionAttemptRef.current !== attempt ||
@@ -126,9 +303,17 @@ export function useRealtimeShopping({
       }
 
       try {
+        trace.toolResultSentAt = Date.now();
         for (const event of functionCallOutputEvents(call.call_id, output)) {
           channel.send(JSON.stringify(event));
         }
+        logDiagnosticEvent('shopping_tool_result_sent', {
+          callId: call.call_id,
+          toolCallToResultMs: trace.toolResultSentAt - trace.toolCallReceivedAt,
+          executionMs: trace.executionStartedAt
+            ? trace.toolResultSentAt - trace.executionStartedAt
+            : undefined,
+        });
         setStatus('ready');
       } catch (cause) {
         if (connectionAttemptRef.current === attempt) {
@@ -137,7 +322,7 @@ export function useRealtimeShopping({
         }
       }
     },
-    [capture, userId],
+    [capture, deviceProfile, userId],
   );
 
   const connect = useCallback(async () => {
@@ -163,7 +348,7 @@ export function useRealtimeShopping({
       channel.onopen = () => {
         if (connectionAttemptRef.current !== attempt) return;
         setStatus('configuring');
-        send(shoppingSessionUpdate);
+        send(shoppingSessionUpdateFor(deviceProfile));
       };
 
       channel.onmessage = (event: unknown) => {
@@ -178,12 +363,34 @@ export function useRealtimeShopping({
         }
 
         if (realtimeEvent.type === 'session.updated') {
+          console.info(
+            `[realtime] ${deviceProfile} audio input configured`,
+            realtimeAudioInputSummary(realtimeEvent),
+          );
           if (!greeted) {
             greeted = true;
+            logDiagnosticEvent('realtime_initial_greeting_requested', {
+              deviceProfile,
+            });
             send(initialGreetingEvent);
           }
           setStatus('ready');
           return;
+        }
+
+        if (
+          realtimeEvent.type === 'input_audio_buffer.speech_started' ||
+          realtimeEvent.type === 'input_audio_buffer.speech_stopped'
+        ) {
+          const now = Date.now();
+          if (realtimeEvent.type === 'input_audio_buffer.speech_started') {
+            lastSpeechStartedAtRef.current = now;
+          } else {
+            lastSpeechStoppedAtRef.current = now;
+          }
+          logDiagnosticEvent(realtimeEvent.type, {
+            deviceProfile,
+          });
         }
 
         if (realtimeEvent.type === 'error') {
@@ -194,9 +401,99 @@ export function useRealtimeShopping({
           return;
         }
 
+        const responseId = realtimeEvent.response?.id;
+        const responsePurpose =
+          realtimeEvent.response?.metadata?.response_purpose;
+        const responseCallId = realtimeEvent.response?.metadata?.call_id;
+        if (
+          responseId &&
+          responsePurpose &&
+          responseCallId &&
+          (realtimeEvent.type === 'response.created' ||
+            realtimeEvent.type === 'response.done')
+        ) {
+          responseTracesRef.current.set(responseId, {
+            callId: responseCallId,
+            purpose: responsePurpose,
+          });
+          const trace = callTracesRef.current.get(responseCallId);
+          logDiagnosticEvent(`realtime_${realtimeEvent.type}`, {
+            callId: responseCallId,
+            responseId,
+            responsePurpose,
+            toolResultToEventMs: trace?.toolResultSentAt
+              ? Date.now() - trace.toolResultSentAt
+              : undefined,
+            toolCallToEventMs: trace
+              ? Date.now() - trace.toolCallReceivedAt
+              : undefined,
+          });
+        }
+
+        if (
+          realtimeEvent.type === 'output_audio_buffer.stopped' &&
+          realtimeEvent.response_id
+        ) {
+          const responseTrace = responseTracesRef.current.get(
+            realtimeEvent.response_id,
+          );
+          if (responseTrace) {
+            const trace = callTracesRef.current.get(responseTrace.callId);
+            logDiagnosticEvent('realtime_output_audio_buffer_stopped', {
+              callId: responseTrace.callId,
+              responseId: realtimeEvent.response_id,
+              responsePurpose: responseTrace.purpose,
+              toolResultToPlaybackEndMs: trace?.toolResultSentAt
+                ? Date.now() - trace.toolResultSentAt
+                : undefined,
+              toolCallToPlaybackEndMs: trace
+                ? Date.now() - trace.toolCallReceivedAt
+                : undefined,
+              speechStoppedToPlaybackEndMs: trace?.speechStoppedAt
+                ? Date.now() - trace.speechStoppedAt
+                : undefined,
+            });
+            responseTracesRef.current.delete(realtimeEvent.response_id);
+            if (responseTrace.purpose === 'shopping_result') {
+              callTracesRef.current.delete(responseTrace.callId);
+            }
+          }
+        }
+
         for (const call of completedShoppingCalls(realtimeEvent)) {
+          if (handledCallsRef.current.has(call.call_id)) {
+            continue;
+          }
+          handledCallsRef.current.add(call.call_id);
+          const receivedAt = Date.now();
+          const trace: ShoppingCallTrace = {
+            callId: call.call_id,
+            toolCallReceivedAt: receivedAt,
+            speechStartedAt: lastSpeechStartedAtRef.current,
+            speechStoppedAt: lastSpeechStoppedAtRef.current,
+          };
+          callTracesRef.current.set(call.call_id, trace);
+          logDiagnosticEvent('realtime_shopping_tool_call_received', {
+            callId: call.call_id,
+            deviceProfile,
+            needsPhoto: (() => {
+              try {
+                return shoppingToolArgumentsSchema.parse(
+                  JSON.parse(call.arguments),
+                ).needs_photo;
+              } catch {
+                return undefined;
+              }
+            })(),
+            speechStartedToToolCallMs: trace.speechStartedAt
+              ? receivedAt - trace.speechStartedAt
+              : undefined,
+            speechStoppedToToolCallMs: trace.speechStoppedAt
+              ? receivedAt - trace.speechStoppedAt
+              : undefined,
+          });
           toolQueueRef.current = toolQueueRef.current.then(() =>
-            executeFunctionCall(call, attempt, channel),
+            executeFunctionCall(call, attempt, channel, trace),
           );
         }
       };
@@ -243,7 +540,7 @@ export function useRealtimeShopping({
 
       if (connectionAttemptRef.current !== attempt) {
         localStream.getTracks().forEach((track) => track.stop());
-        peer.close();
+        closePeerSafely(peer);
         return;
       }
 
@@ -252,7 +549,28 @@ export function useRealtimeShopping({
       peer.addTrack(audioTrack, localStream);
 
       const offer = await peer.createOffer();
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
       await peer.setLocalDescription(offer);
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
+      const handshakeController = new AbortController();
+      handshakeAbortRef.current = {
+        attempt,
+        controller: handshakeController,
+      };
       const sdpResponse = await fetch(
         'https://api.openai.com/v1/realtime/calls',
         {
@@ -262,6 +580,7 @@ export function useRealtimeShopping({
             'Content-Type': 'application/sdp',
           },
           body: offer.sdp,
+          signal: handshakeController.signal,
         },
       );
       if (!sdpResponse.ok) {
@@ -269,12 +588,48 @@ export function useRealtimeShopping({
           `The Realtime audio handshake failed (${sdpResponse.status}).`,
         );
       }
-      await peer.setRemoteDescription({
+      const answerSdp = await sdpResponse.text();
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
+      const remoteDescriptionPromise = peer.setRemoteDescription({
         type: 'answer',
-        sdp: await sdpResponse.text(),
+        sdp: answerSdp,
       });
+      const pendingRemoteDescription = {
+        peer,
+        promise: remoteDescriptionPromise,
+      };
+      pendingRemoteDescriptionRef.current = pendingRemoteDescription;
+      try {
+        await remoteDescriptionPromise;
+      } finally {
+        if (pendingRemoteDescriptionRef.current === pendingRemoteDescription) {
+          pendingRemoteDescriptionRef.current = null;
+        }
+      }
+      if (handshakeAbortRef.current?.attempt === attempt) {
+        handshakeAbortRef.current = null;
+      }
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+      }
     } catch (cause) {
-      peer?.close();
+      if (handshakeAbortRef.current?.attempt === attempt) {
+        handshakeAbortRef.current = null;
+      }
+      if (peer) {
+        closePeerSafely(peer);
+      }
       stream?.getTracks().forEach((track) => track.stop());
       if (connectionAttemptRef.current === attempt) {
         if (peerRef.current === peer) peerRef.current = null;
@@ -285,7 +640,7 @@ export function useRealtimeShopping({
         setStatus('error');
       }
     }
-  }, [enabled, executeFunctionCall, userId]);
+  }, [closePeerSafely, deviceProfile, enabled, executeFunctionCall, userId]);
 
   useEffect(() => {
     const start = enabled ? setTimeout(() => void connect(), 0) : undefined;

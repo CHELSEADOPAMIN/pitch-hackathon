@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { shoppingModelMessage } from '../../server/agent/shopping-agent';
+import {
+  hasTerminalSearchFailure,
+  SHOPPING_AGENT_MAX_STEPS,
+  shoppingAgentPrompt,
+  shoppingModelMessage,
+} from '../../server/agent/shopping-agent';
 
 describe('Terra shopping message', () => {
   it('uses the AI SDK v7 canonical JPEG file part with raw base64', () => {
@@ -38,5 +43,38 @@ describe('Terra shopping message', () => {
         },
       ],
     });
+  });
+
+  it('treats the deliberately held foreground product as the image target', () => {
+    const prompt = shoppingAgentPrompt(
+      '- product_bar: Musashi Protein Crisp; black snack wrapper',
+    );
+
+    expect(prompt).toContain('deliberately holding closest to the camera');
+    expect(prompt).toContain('held foreground package as background');
+    expect(prompt).toContain('Never select a background product');
+  });
+
+  it('stops immediately after catalogue search proves no match', () => {
+    expect(
+      hasTerminalSearchFailure([
+        {
+          toolName: 'search_products',
+          output: { status: 'error', reason: 'product_not_found' },
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      hasTerminalSearchFailure([
+        {
+          toolName: 'search_products',
+          output: { status: 'search_results', products: [] },
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it('caps pathological loops without constraining normal two-step flows', () => {
+    expect(SHOPPING_AGENT_MAX_STEPS).toBe(6);
   });
 });

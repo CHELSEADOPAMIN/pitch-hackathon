@@ -63,7 +63,8 @@ camera-assisted verification.
 ## What works today
 
 - Android customer and merchant experiences
-- Live camera capture for product context
+- Live phone-camera capture and optional M02 smart-glasses capture
+- Smart-glasses microphone and speaker routing for hands-free use
 - Realtime, interruptible voice interaction
 - Product identification against a merchant catalogue
 - Voice-based add, remove, cart review, quote, and checkout
@@ -92,7 +93,7 @@ There is no fake payment-success path in the demonstrated flow.
 ## Architecture
 
 ```text
-Android camera + microphone
+Android phone or M02 glasses
             |
             v
 OpenAI Realtime voice session
@@ -101,7 +102,7 @@ OpenAI Realtime voice session
 Single shopping_agent tool
             |
             v
-GPT-5.6 Terra agent
+GPT-5.6 Sol agent
             |
             v
 Authoritative cart and checkout service
@@ -114,7 +115,7 @@ Merchant paid-order view
 ```
 
 OpenAI Realtime handles the low-latency conversation and calls a single
-`shopping_agent` tool. The server-side `gpt-5.6-terra` agent identifies the
+`shopping_agent` tool. The server-side `gpt-5.6-sol` agent identifies the
 requested action and reads or mutates the authoritative cart. Checkout always
 returns an exact quote first and charges through Pinch only after explicit
 confirmation.
@@ -144,11 +145,24 @@ Copy `.env.example` to `.env` and provide the required values. Never place a
 Pinch secret or OpenAI key in an `EXPO_PUBLIC_*` variable. The Pinch
 publishable key is the only Pinch credential embedded in the app.
 
-All Pinch credentials must use sandbox prefixes and:
+For the final Android build, keep the complete server and client configuration in
+`.env`, then run:
 
-```text
-PINCH_API_BASE_URL=https://api.getpinch.com.au/test
+```bash
+npm run final:env:check
+npm run final:prebuild
+npm run final:android
 ```
+
+The final-build wrapper validates every server value, maps
+`PINCH_PUBLISHABLE_KEY` to `EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY`, and injects only
+the public API URL and publishable key into the APK. It fails before compilation
+if the environment is incomplete or the client and server Pinch keys differ.
+
+All Pinch credentials must use sandbox prefixes and
+`PINCH_API_BASE_URL=https://api.getpinch.com.au/test`. Set `DATABASE_SCHEMA` to
+the schema used by the deployment. It defaults to `public`; the isolated Codex
+test deployment uses `codex_voice`.
 
 Install dependencies, initialise the database, seed the demo merchant and
 catalogue, and start the API and app:
