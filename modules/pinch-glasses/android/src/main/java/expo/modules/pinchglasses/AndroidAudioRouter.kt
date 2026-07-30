@@ -19,7 +19,7 @@ internal class AndroidAudioRouter(context: Context) {
   private companion object {
     private const val logTag = "PinchAudio"
     private const val routeConfirmationTimeoutMs = 5_000L
-    private const val routeSettleMs = 300L
+    private const val routeSettleMs = 800L
   }
 
   private val appContext = context.applicationContext

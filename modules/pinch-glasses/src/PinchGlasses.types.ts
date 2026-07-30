@@ -38,9 +38,13 @@ export type GlassesThumbnailPhoto = {
   packetCount: number;
   negotiatedMtu: number;
   highPriorityRequested: boolean;
+  highPriorityRefreshRequested?: boolean;
+  firstSlowChunkMs?: number;
   packetIntervalAverageMs?: number;
   packetIntervalP95Ms?: number;
   packetIntervalMaxMs?: number;
+  audioHandoffToPhoneMs?: number;
+  audioHandoffRestoreMs?: number;
   connectionMs: number;
   shutterMs: number;
   firstChunkMs: number;
@@ -49,6 +53,12 @@ export type GlassesThumbnailPhoto = {
   commandError?: number;
   commandWorkType?: number;
   commandResponseHex?: string;
+};
+
+export type GlassesRealtimePreparation = {
+  highPriorityRequested: boolean;
+  negotiatedMtu: number;
+  warmupMs: number;
 };
 
 export type AudioRoute = 'phone' | 'm02';

@@ -5,6 +5,8 @@ import {
   functionCallOutputEvents,
   initialGreetingEvent,
   parseRealtimeEvent,
+  PHOTO_ACK_PLAYBACK_TIMEOUT_MS,
+  photoCaptureAcknowledgementEvent,
   realtimeAudioInputSummary,
   TOOL_PROGRESS_DELAY_MS,
   toolProgressEvent,
@@ -122,6 +124,28 @@ describe('Realtime protocol', () => {
         metadata: {
           response_purpose: 'tool_progress',
           call_id: 'call_slow',
+        },
+      },
+    });
+  });
+
+  it('creates one short acknowledgement before an M02 photo transfer', () => {
+    const event = photoCaptureAcknowledgementEvent('call_photo');
+
+    expect(PHOTO_ACK_PLAYBACK_TIMEOUT_MS).toBe(4_000);
+    expect(event).toMatchObject({
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        input: [],
+        instructions:
+          'Say exactly: "Got it. Taking a look." Do not say anything else.',
+        tools: [],
+        tool_choice: 'none',
+        output_modalities: ['audio'],
+        metadata: {
+          response_purpose: 'photo_capture_acknowledgement',
+          call_id: 'call_photo',
         },
       },
     });

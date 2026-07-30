@@ -26,8 +26,20 @@ class PinchGlassesModule : Module() {
       client().disconnect()
     }
 
+    AsyncFunction("prepareForRealtimeAsync") Coroutine { ->
+      client().prepareForRealtime()
+    }
+
     AsyncFunction("captureThumbnailAsync") Coroutine { qualityLevel: Int ->
-      client().captureThumbnail(qualityLevel)
+      client().captureThumbnail(
+        qualityLevel = qualityLevel,
+        beforeTransfer = {
+          router().select("phone")
+        },
+        afterTransfer = {
+          router().select("m02")
+        },
+      )
     }
 
     Function("logTrace") { message: String ->

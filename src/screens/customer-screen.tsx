@@ -14,6 +14,7 @@ import {
   disconnectGlasses,
   getGlassesStatus,
   type GlassesStatus,
+  prepareGlassesForRealtime,
   requestGlassesPermissions,
   selectCommunicationAudioRoute,
   subscribeToGlassesStatus,
@@ -141,9 +142,14 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
           }
           const connected = await connectGlasses();
           const audioRoute = await selectCommunicationAudioRoute('m02');
+          const transportPreparation = await prepareGlassesForRealtime();
           if (configurationAttempt.current === attempt) {
             setGlassesStatus(connected);
             console.info('[audio] M02 communication route ready.', audioRoute);
+            console.info(
+              '[capture] M02 transport prepared before Realtime.',
+              transportPreparation,
+            );
           }
         } else {
           let cameraResult = await getCameraPermission();
