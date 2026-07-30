@@ -38,7 +38,6 @@ export type GlassesThumbnailPhoto = {
   packetCount: number;
   negotiatedMtu: number;
   highPriorityRequested: boolean;
-  balancedPriorityRequested: boolean;
   packetIntervalAverageMs?: number;
   packetIntervalP95Ms?: number;
   packetIntervalMaxMs?: number;
@@ -59,4 +58,5 @@ export type AudioRouteStatus = {
   selected: boolean;
   deviceName?: string;
   deviceType?: number;
+  confirmationMs?: number;
 };

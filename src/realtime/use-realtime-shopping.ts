@@ -53,6 +53,11 @@ type RealtimeResponseTrace = {
   purpose: string;
 };
 
+type PendingRemoteDescription = {
+  peer: RTCPeerConnection;
+  promise: Promise<void>;
+};
+
 export type RealtimeStatus =
   'idle' | 'connecting' | 'configuring' | 'ready' | 'working' | 'error';
 
@@ -85,21 +90,55 @@ export function useRealtimeShopping({
   const responseTracesRef = useRef(new Map<string, RealtimeResponseTrace>());
   const lastSpeechStartedAtRef = useRef<number | undefined>(undefined);
   const lastSpeechStoppedAtRef = useRef<number | undefined>(undefined);
+  const handshakeAbortRef = useRef<{
+    attempt: number;
+    controller: AbortController;
+  } | null>(null);
+  const pendingRemoteDescriptionRef = useRef<PendingRemoteDescription | null>(
+    null,
+  );
 
-  const disconnect = useCallback((resetStatus = true) => {
-    connectionAttemptRef.current += 1;
-    peerRef.current?.close();
-    peerRef.current = null;
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-    remoteStreamRef.current = null;
-    handledCallsRef.current.clear();
-    callTracesRef.current.clear();
-    responseTracesRef.current.clear();
-    lastSpeechStartedAtRef.current = undefined;
-    lastSpeechStoppedAtRef.current = undefined;
-    if (resetStatus) setStatus('idle');
+  const closePeerSafely = useCallback((peer: RTCPeerConnection) => {
+    const pending = pendingRemoteDescriptionRef.current;
+    if (pending?.peer !== peer) {
+      peer.close();
+      return;
+    }
+
+    // react-native-webrtc can crash natively if close() races an in-flight
+    // setRemoteDescription(). Defer disposal until that native call settles.
+    void pending.promise
+      .catch(() => undefined)
+      .then(() => {
+        if (pendingRemoteDescriptionRef.current === pending) {
+          pendingRemoteDescriptionRef.current = null;
+        }
+        peer.close();
+      });
   }, []);
+
+  const disconnect = useCallback(
+    (resetStatus = true) => {
+      connectionAttemptRef.current += 1;
+      handshakeAbortRef.current?.controller.abort();
+      handshakeAbortRef.current = null;
+      const peer = peerRef.current;
+      peerRef.current = null;
+      if (peer) {
+        closePeerSafely(peer);
+      }
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+      remoteStreamRef.current = null;
+      handledCallsRef.current.clear();
+      callTracesRef.current.clear();
+      responseTracesRef.current.clear();
+      lastSpeechStartedAtRef.current = undefined;
+      lastSpeechStoppedAtRef.current = undefined;
+      if (resetStatus) setStatus('idle');
+    },
+    [closePeerSafely],
+  );
 
   const executeFunctionCall = useCallback(
     async (
@@ -138,26 +177,6 @@ export function useRealtimeShopping({
         const input = shoppingToolArgumentsSchema.parse(
           JSON.parse(call.arguments),
         );
-        progressTimer = setTimeout(() => {
-          if (
-            connectionAttemptRef.current !== attempt ||
-            channel.readyState !== 'open'
-          ) {
-            return;
-          }
-          try {
-            channel.send(JSON.stringify(toolProgressEvent(call.call_id)));
-            logDiagnosticEvent('shopping_progress_response_requested', {
-              callId: call.call_id,
-              elapsedMs: Date.now() - startedAt,
-            });
-          } catch (cause) {
-            console.warn(
-              '[shopping] Could not send pending-tool progress update.',
-              errorMessage(cause),
-            );
-          }
-        }, TOOL_PROGRESS_DELAY_MS);
 
         currentStage = 'capture';
         captureStartedAt = input.needs_photo ? Date.now() : undefined;
@@ -185,6 +204,31 @@ export function useRealtimeShopping({
           hasImage: Boolean(imageBase64),
           imageBase64Chars: imageBase64?.length ?? 0,
         });
+        const progressTimerStartedAt = agentStartedAt;
+        // M02 sends its photo over BLE while Realtime audio uses Bluetooth SCO.
+        // Starting this timer before capture can make the progress speech steal
+        // bandwidth from an active photo transfer and stretch it past a minute.
+        progressTimer = setTimeout(() => {
+          if (
+            connectionAttemptRef.current !== attempt ||
+            channel.readyState !== 'open'
+          ) {
+            return;
+          }
+          try {
+            channel.send(JSON.stringify(toolProgressEvent(call.call_id)));
+            logDiagnosticEvent('shopping_progress_response_requested', {
+              callId: call.call_id,
+              elapsedMs: Date.now() - startedAt,
+              agentElapsedMs: Date.now() - progressTimerStartedAt,
+            });
+          } catch (cause) {
+            console.warn(
+              '[shopping] Could not send pending-tool progress update.',
+              errorMessage(cause),
+            );
+          }
+        }, TOOL_PROGRESS_DELAY_MS);
         const response = await api.api.agent.$post(
           {
             json: {
@@ -325,6 +369,9 @@ export function useRealtimeShopping({
           );
           if (!greeted) {
             greeted = true;
+            logDiagnosticEvent('realtime_initial_greeting_requested', {
+              deviceProfile,
+            });
             send(initialGreetingEvent);
           }
           setStatus('ready');
@@ -493,7 +540,7 @@ export function useRealtimeShopping({
 
       if (connectionAttemptRef.current !== attempt) {
         localStream.getTracks().forEach((track) => track.stop());
-        peer.close();
+        closePeerSafely(peer);
         return;
       }
 
@@ -502,7 +549,28 @@ export function useRealtimeShopping({
       peer.addTrack(audioTrack, localStream);
 
       const offer = await peer.createOffer();
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
       await peer.setLocalDescription(offer);
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
+      const handshakeController = new AbortController();
+      handshakeAbortRef.current = {
+        attempt,
+        controller: handshakeController,
+      };
       const sdpResponse = await fetch(
         'https://api.openai.com/v1/realtime/calls',
         {
@@ -512,6 +580,7 @@ export function useRealtimeShopping({
             'Content-Type': 'application/sdp',
           },
           body: offer.sdp,
+          signal: handshakeController.signal,
         },
       );
       if (!sdpResponse.ok) {
@@ -519,12 +588,48 @@ export function useRealtimeShopping({
           `The Realtime audio handshake failed (${sdpResponse.status}).`,
         );
       }
-      await peer.setRemoteDescription({
+      const answerSdp = await sdpResponse.text();
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+        return;
+      }
+      const remoteDescriptionPromise = peer.setRemoteDescription({
         type: 'answer',
-        sdp: await sdpResponse.text(),
+        sdp: answerSdp,
       });
+      const pendingRemoteDescription = {
+        peer,
+        promise: remoteDescriptionPromise,
+      };
+      pendingRemoteDescriptionRef.current = pendingRemoteDescription;
+      try {
+        await remoteDescriptionPromise;
+      } finally {
+        if (pendingRemoteDescriptionRef.current === pendingRemoteDescription) {
+          pendingRemoteDescriptionRef.current = null;
+        }
+      }
+      if (handshakeAbortRef.current?.attempt === attempt) {
+        handshakeAbortRef.current = null;
+      }
+      if (
+        connectionAttemptRef.current !== attempt ||
+        peerRef.current !== peer
+      ) {
+        localStream.getTracks().forEach((track) => track.stop());
+        closePeerSafely(peer);
+      }
     } catch (cause) {
-      peer?.close();
+      if (handshakeAbortRef.current?.attempt === attempt) {
+        handshakeAbortRef.current = null;
+      }
+      if (peer) {
+        closePeerSafely(peer);
+      }
       stream?.getTracks().forEach((track) => track.stop());
       if (connectionAttemptRef.current === attempt) {
         if (peerRef.current === peer) peerRef.current = null;
@@ -535,7 +640,7 @@ export function useRealtimeShopping({
         setStatus('error');
       }
     }
-  }, [deviceProfile, enabled, executeFunctionCall, userId]);
+  }, [closePeerSafely, deviceProfile, enabled, executeFunctionCall, userId]);
 
   useEffect(() => {
     const start = enabled ? setTimeout(() => void connect(), 0) : undefined;

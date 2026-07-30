@@ -7,15 +7,27 @@ import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal class AndroidAudioRouter(context: Context) {
+  private companion object {
+    private const val logTag = "PinchAudio"
+    private const val routeConfirmationTimeoutMs = 5_000L
+    private const val routeSettleMs = 300L
+  }
+
   private val appContext = context.applicationContext
   private val audioManager = appContext.getSystemService(AudioManager::class.java)
   private var previousMode: Int? = null
 
   @SuppressLint("MissingPermission")
-  fun select(route: String): Map<String, Any?> {
+  suspend fun select(route: String): Map<String, Any?> {
     require(route == "phone" || route == "m02") {
       "Audio route must be either phone or m02."
     }
@@ -63,10 +75,32 @@ internal class AndroidAudioRouter(context: Context) {
       },
     )
 
-    if (!audioManager.setCommunicationDevice(selected)) {
-      error("Android rejected the requested $route communication audio route.")
+    val requestedAt = SystemClock.elapsedRealtime()
+    Log.i(
+      logTag,
+      "Communication route requested route=$route device=${selected.productName} " +
+        "type=${selected.type}",
+    )
+    val confirmed = withTimeoutOrNull(routeConfirmationTimeoutMs) {
+      awaitSelectedDevice(selected)
+    } != null
+    if (!confirmed) {
+      error(
+        "Android did not activate the requested $route audio route within " +
+          "${routeConfirmationTimeoutMs}ms.",
+      )
     }
-    return status(route)
+
+    // Android can report the new communication device just before SCO audio is
+    // completely stable. Keep this bounded settling window ahead of WebRTC.
+    delay(routeSettleMs)
+    val confirmationMs = SystemClock.elapsedRealtime() - requestedAt
+    Log.i(
+      logTag,
+      "Communication route confirmed route=$route device=${selected.productName} " +
+        "confirmationMs=$confirmationMs",
+    )
+    return status(route) + ("confirmationMs" to confirmationMs)
   }
 
   fun clear(): Map<String, Any?> {
@@ -90,5 +124,62 @@ internal class AndroidAudioRouter(context: Context) {
       "deviceName" to selected?.productName?.toString(),
       "deviceType" to selected?.type,
     )
+  }
+
+  @SuppressLint("MissingPermission")
+  private suspend fun awaitSelectedDevice(selected: AudioDeviceInfo) {
+    suspendCancellableCoroutine { continuation ->
+      val finished = AtomicBoolean(false)
+      var listener: AudioManager.OnCommunicationDeviceChangedListener? = null
+
+      fun removeListener() {
+        listener?.let {
+          runCatching {
+            audioManager.removeOnCommunicationDeviceChangedListener(it)
+          }
+        }
+        listener = null
+      }
+
+      fun complete(result: Result<Unit>) {
+        if (!finished.compareAndSet(false, true)) {
+          return
+        }
+        removeListener()
+        if (continuation.isActive) {
+          continuation.resumeWith(result)
+        }
+      }
+
+      listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
+        if (device?.id == selected.id) {
+          complete(Result.success(Unit))
+        }
+      }
+      audioManager.addOnCommunicationDeviceChangedListener(
+        appContext.mainExecutor,
+        requireNotNull(listener),
+      )
+      continuation.invokeOnCancellation {
+        if (finished.compareAndSet(false, true)) {
+          removeListener()
+        }
+      }
+
+      if (!audioManager.setCommunicationDevice(selected)) {
+        complete(
+          Result.failure(
+            IllegalStateException(
+              "Android rejected the requested communication audio route.",
+            ),
+          ),
+        )
+        return@suspendCancellableCoroutine
+      }
+
+      if (audioManager.communicationDevice?.id == selected.id) {
+        complete(Result.success(Unit))
+      }
+    }
   }
 }

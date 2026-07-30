@@ -140,9 +140,10 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             throw new Error('Allow nearby-device access to connect M02.');
           }
           const connected = await connectGlasses();
-          await selectCommunicationAudioRoute('m02');
+          const audioRoute = await selectCommunicationAudioRoute('m02');
           if (configurationAttempt.current === attempt) {
             setGlassesStatus(connected);
+            console.info('[audio] M02 communication route ready.', audioRoute);
           }
         } else {
           let cameraResult = await getCameraPermission();
@@ -162,9 +163,13 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
             );
           }
           await disconnectGlasses();
-          await selectCommunicationAudioRoute('phone');
+          const audioRoute = await selectCommunicationAudioRoute('phone');
           if (configurationAttempt.current === attempt) {
             setGlassesStatus(disconnectedGlassesStatus);
+            console.info(
+              '[audio] Phone communication route ready.',
+              audioRoute,
+            );
           }
         }
         if (configurationAttempt.current === attempt) {
@@ -269,16 +274,6 @@ export function CustomerScreen({ session }: { session: LoginResponse }) {
     (profile === 'phone' ? cameraError : undefined) ??
     realtime.error;
   const voiceActive = realtime.status !== 'idle' && realtime.status !== 'error';
-
-  useEffect(() => {
-    if (realtime.status !== 'ready') {
-      return;
-    }
-    void selectCommunicationAudioRoute(profile).catch((error) => {
-      setDeviceError(message(error));
-      setAudioRouteReady(false);
-    });
-  }, [profile, realtime.status]);
 
   const switchProfile = useCallback(
     (nextProfile: DeviceProfile) => {

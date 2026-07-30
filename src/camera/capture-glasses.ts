@@ -84,7 +84,6 @@ export async function captureProductWithGlasses() {
     packetCount: result.packetCount,
     negotiatedMtu: result.negotiatedMtu,
     highPriorityRequested: result.highPriorityRequested,
-    balancedPriorityRequested: result.balancedPriorityRequested,
     packetIntervalAverageMs: result.packetIntervalAverageMs,
     packetIntervalP95Ms: result.packetIntervalP95Ms,
     packetIntervalMaxMs: result.packetIntervalMaxMs,

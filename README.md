@@ -4,7 +4,7 @@ Android-only hackathon MVP for hands-free shopping. A customer speaks naturally
 while viewing a live camera finder, and the app captures a frame when product
 context is needed. OpenAI
 Realtime calls the single `shopping_agent` tool, and the server uses a
-`gpt-5.6-terra` agent to read or mutate the authoritative cart. Checkout always
+`gpt-5.6-sol` agent to read or mutate the authoritative cart. Checkout always
 returns an exact quote first and charges through Pinch sandbox only after explicit
 confirmation.
 
@@ -20,6 +20,20 @@ confirmation.
 Copy `.env.example` to `.env` and provide the required values. Never place a Pinch
 secret or OpenAI key in an `EXPO_PUBLIC_*` variable. The Pinch publishable key is
 the only Pinch credential embedded in the app.
+
+For the final Android build, keep the complete server and client configuration in
+`.env`, then run:
+
+```bash
+npm run final:env:check
+npm run final:prebuild
+npm run final:android
+```
+
+The final-build wrapper validates every server value, maps
+`PINCH_PUBLISHABLE_KEY` to `EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY`, and injects only
+the public API URL and publishable key into the APK. It fails before compilation
+if the environment is incomplete or the client and server Pinch keys differ.
 
 All Pinch credentials must use sandbox prefixes and
 `PINCH_API_BASE_URL=https://api.getpinch.com.au/test`. Set `DATABASE_SCHEMA` to

@@ -34,7 +34,7 @@ class PinchGlassesModule : Module() {
       Log.i("PinchTrace", message.take(3_500))
     }
 
-    AsyncFunction("setAudioRouteAsync") { route: String ->
+    AsyncFunction("setAudioRouteAsync") Coroutine { route: String ->
       router().select(route)
     }
 

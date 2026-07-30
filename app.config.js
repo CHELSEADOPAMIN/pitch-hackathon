@@ -5,6 +5,19 @@ const easProjectId =
   (owner === 'chelsea_yang'
     ? '365da739-7c8b-49a2-9ea2-db9842d59a25'
     : undefined);
+const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+const pinchPublishableKey =
+  process.env.EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY ??
+  process.env.PINCH_PUBLISHABLE_KEY;
+
+if (process.env.PINCH_FINAL_BUILD === '1') {
+  if (!apiUrl?.startsWith('https://')) {
+    throw new Error('Final builds require EXPO_PUBLIC_API_URL to use HTTPS.');
+  }
+  if (!pinchPublishableKey?.startsWith('pk_test_')) {
+    throw new Error('Final builds require EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY.');
+  }
+}
 
 const config = {
   name: process.env.EXPO_APP_NAME ?? 'Pinch Voice',
@@ -61,10 +74,8 @@ const config = {
     reactCompiler: true,
   },
   extra: {
-    apiUrl: process.env.EXPO_PUBLIC_API_URL,
-    pinchPublishableKey:
-      process.env.EXPO_PUBLIC_PINCH_PUBLISHABLE_KEY ??
-      process.env.PINCH_PUBLISHABLE_KEY,
+    apiUrl,
+    pinchPublishableKey,
     enableDemoControls: process.env.EXPO_PUBLIC_ENABLE_DEMO_CONTROLS === '1',
     eas: easProjectId ? { projectId: easProjectId } : undefined,
   },

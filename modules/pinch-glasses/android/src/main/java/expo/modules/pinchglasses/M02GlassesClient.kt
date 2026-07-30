@@ -51,7 +51,6 @@ internal class M02GlassesClient(
     private const val actionGlassesControl = 0x41
     private const val actionDeviceNotification = 0x73
     private const val actionPictureThumbnail = 0xFD
-    private const val thumbnailTransferTimeoutMs = 15_000L
     private const val logTag = "PinchGlasses"
   }
 
@@ -232,49 +231,47 @@ internal class M02GlassesClient(
         val packetIntervalsMs = mutableListOf<Long>()
         val imageBytes = ByteArrayOutputStream()
 
-        withTimeout(thumbnailTransferTimeoutMs) {
-          while (true) {
-            ble.writeFast(
-              actionPictureThumbnail,
-              byteArrayOf(
-                1,
-                (expectedIndex and 0xFF).toByte(),
-                ((expectedIndex ushr 8) and 0xFF).toByte(),
-              ),
+        while (true) {
+          ble.writeFast(
+            actionPictureThumbnail,
+            byteArrayOf(
+              1,
+              (expectedIndex and 0xFF).toByte(),
+              ((expectedIndex ushr 8) and 0xFF).toByte(),
+            ),
+          )
+          val frame = withTimeout(5_000) {
+            ble.awaitFrame(actionPictureThumbnail)
+          }
+          val packetReceivedAt = SystemClock.elapsedRealtime()
+          previousPacketAt?.let {
+            packetIntervalsMs += packetReceivedAt - it
+          }
+          previousPacketAt = packetReceivedAt
+          if (frame.size < 11) {
+            error("The M02 returned an incomplete BLE photo packet.")
+          }
+          val total = littleEndian16(frame, 7)
+          val current = littleEndian16(frame, 9)
+          if (total !in 1..4_096) {
+            error("The M02 returned an invalid BLE photo packet count ($total).")
+          }
+          if (current != expectedIndex) {
+            error(
+              "The M02 returned BLE photo packet $current while packet $expectedIndex was expected.",
             )
-            val frame = withTimeout(5_000) {
-              ble.awaitFrame(actionPictureThumbnail)
-            }
-            val packetReceivedAt = SystemClock.elapsedRealtime()
-            previousPacketAt?.let {
-              packetIntervalsMs += packetReceivedAt - it
-            }
-            previousPacketAt = packetReceivedAt
-            if (frame.size < 11) {
-              error("The M02 returned an incomplete BLE photo packet.")
-            }
-            val total = littleEndian16(frame, 7)
-            val current = littleEndian16(frame, 9)
-            if (total !in 1..4_096) {
-              error("The M02 returned an invalid BLE photo packet count ($total).")
-            }
-            if (current != expectedIndex) {
-              error(
-                "The M02 returned BLE photo packet $current while packet $expectedIndex was expected.",
-              )
-            }
-            if (expectedTotal != null && expectedTotal != total) {
-              error("The M02 changed the BLE photo packet count during transfer.")
-            }
-            expectedTotal = total
-            if (firstChunkAt == null) {
-              firstChunkAt = packetReceivedAt
-            }
-            imageBytes.write(frame, 11, frame.size - 11)
-            expectedIndex += 1
-            if (expectedIndex == total) {
-              break
-            }
+          }
+          if (expectedTotal != null && expectedTotal != total) {
+            error("The M02 changed the BLE photo packet count during transfer.")
+          }
+          expectedTotal = total
+          if (firstChunkAt == null) {
+            firstChunkAt = packetReceivedAt
+          }
+          imageBytes.write(frame, 11, frame.size - 11)
+          expectedIndex += 1
+          if (expectedIndex == total) {
+            break
           }
         }
 
@@ -304,9 +301,6 @@ internal class M02GlassesClient(
         }
 
         val finishedAt = SystemClock.elapsedRealtime()
-        val balancedPriorityRequested = ble.requestConnectionPriority(
-          BluetoothGatt.CONNECTION_PRIORITY_BALANCED,
-        )
         val packetIntervalAverageMs = packetIntervalsMs
           .takeIf { it.isNotEmpty() }
           ?.average()
@@ -319,8 +313,7 @@ internal class M02GlassesClient(
             "${requireNotNull(thumbnailReadyAt) - commandStartedAt} " +
             "transferMs=${finishedAt - transferStartedAt} " +
             "packetAvgMs=$packetIntervalAverageMs packetP95Ms=$packetIntervalP95Ms " +
-            "packetMaxMs=$packetIntervalMaxMs " +
-            "BALANCED requested=$balancedPriorityRequested",
+            "packetMaxMs=$packetIntervalMaxMs",
         )
         emitStatus(
           "ready",
@@ -339,7 +332,6 @@ internal class M02GlassesClient(
           "packetCount" to requireNotNull(expectedTotal),
           "negotiatedMtu" to ble.negotiatedMtu,
           "highPriorityRequested" to highPriorityRequested,
-          "balancedPriorityRequested" to balancedPriorityRequested,
           "packetIntervalAverageMs" to packetIntervalAverageMs,
           "packetIntervalP95Ms" to packetIntervalP95Ms,
           "packetIntervalMaxMs" to packetIntervalMaxMs,
@@ -527,6 +519,15 @@ internal class M02GlassesClient(
             }
             discoveredWrite = writeCharacteristic
             discoveredNotify = notifyCharacteristic
+            val highPriorityRequested = runCatching {
+              gatt.requestConnectionPriority(
+                BluetoothGatt.CONNECTION_PRIORITY_HIGH,
+              )
+            }.getOrDefault(false)
+            Log.i(
+              logTag,
+              "M02 connection priority HIGH requested=$highPriorityRequested",
+            )
             if (!gatt.requestMtu(517)) {
               enableNotifications(gatt)
             }
