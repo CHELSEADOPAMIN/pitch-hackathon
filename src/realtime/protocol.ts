@@ -151,6 +151,27 @@ export function functionCallOutputEvents(callId: string, result: AgentResult) {
 }
 
 export const TOOL_PROGRESS_DELAY_MS = 7_000;
+export const PHOTO_ACK_PLAYBACK_TIMEOUT_MS = 4_000;
+
+export function photoCaptureAcknowledgementEvent(callId: string) {
+  return {
+    type: 'response.create',
+    response: {
+      conversation: 'none',
+      input: [],
+      instructions:
+        'Say exactly: "Got it. Taking a look." Do not say anything else.',
+      tools: [],
+      tool_choice: 'none',
+      output_modalities: ['audio'],
+      max_output_tokens: 32,
+      metadata: {
+        response_purpose: 'photo_capture_acknowledgement',
+        call_id: callId,
+      },
+    },
+  } as const;
+}
 
 export function toolProgressEvent(callId: string) {
   return {

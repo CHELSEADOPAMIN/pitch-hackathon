@@ -20,18 +20,18 @@ if (process.env.PINCH_FINAL_BUILD === '1') {
 }
 
 const config = {
-  name: process.env.EXPO_APP_NAME ?? 'Pinch M02 Lab',
-  slug: process.env.EXPO_APP_SLUG ?? 'pinch-m02-warmup-lab',
+  name: process.env.EXPO_APP_NAME ?? 'Pinch M02 SCO Lab',
+  slug: process.env.EXPO_APP_SLUG ?? 'pinch-m02-sco-lab',
   owner,
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/images/icon-final.png',
-  scheme: process.env.EXPO_SCHEME ?? 'pinchm02lab',
+  scheme: process.env.EXPO_SCHEME ?? 'pinchm02scolab',
   userInterfaceStyle: 'light',
   android: {
     package:
       process.env.EXPO_ANDROID_PACKAGE ??
-      'au.com.crokily.pinchvoice.glasses.warmup',
+      'au.com.crokily.pinchvoice.glasses.sco',
     permissions: ['CAMERA', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS'],
     adaptiveIcon: {
       backgroundColor: '#141812',

@@ -18,6 +18,8 @@ import {
   functionCallOutputEvents,
   initialGreetingEvent,
   parseRealtimeEvent,
+  PHOTO_ACK_PLAYBACK_TIMEOUT_MS,
+  photoCaptureAcknowledgementEvent,
   realtimeAudioInputSummary,
   TOOL_PROGRESS_DELAY_MS,
   toolProgressEvent,
@@ -58,6 +60,11 @@ type PendingRemoteDescription = {
   promise: Promise<void>;
 };
 
+type CaptureAcknowledgementWaiter = {
+  resolve: (played: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
 export type RealtimeStatus =
   'idle' | 'connecting' | 'configuring' | 'ready' | 'working' | 'error';
 
@@ -88,6 +95,9 @@ export function useRealtimeShopping({
   const connectionAttemptRef = useRef(0);
   const callTracesRef = useRef(new Map<string, ShoppingCallTrace>());
   const responseTracesRef = useRef(new Map<string, RealtimeResponseTrace>());
+  const captureAcknowledgementWaitersRef = useRef(
+    new Map<string, CaptureAcknowledgementWaiter>(),
+  );
   const lastSpeechStartedAtRef = useRef<number | undefined>(undefined);
   const lastSpeechStoppedAtRef = useRef<number | undefined>(undefined);
   const handshakeAbortRef = useRef<{
@@ -133,6 +143,11 @@ export function useRealtimeShopping({
       handledCallsRef.current.clear();
       callTracesRef.current.clear();
       responseTracesRef.current.clear();
+      for (const waiter of captureAcknowledgementWaitersRef.current.values()) {
+        clearTimeout(waiter.timeout);
+        waiter.resolve(false);
+      }
+      captureAcknowledgementWaitersRef.current.clear();
       lastSpeechStartedAtRef.current = undefined;
       lastSpeechStoppedAtRef.current = undefined;
       if (resetStatus) setStatus('idle');
@@ -178,6 +193,53 @@ export function useRealtimeShopping({
           JSON.parse(call.arguments),
         );
 
+        if (input.needs_photo && deviceProfile === 'm02') {
+          currentStage = 'capture acknowledgement';
+          const acknowledgementStartedAt = Date.now();
+          const acknowledgementPlayed = await new Promise<boolean>(
+            (resolve, reject) => {
+              const settle = (played: boolean) => {
+                const waiter =
+                  captureAcknowledgementWaitersRef.current.get(call.call_id);
+                if (waiter) {
+                  clearTimeout(waiter.timeout);
+                  captureAcknowledgementWaitersRef.current.delete(call.call_id);
+                }
+                resolve(played);
+              };
+              const timeout = setTimeout(() => {
+                settle(false);
+              }, PHOTO_ACK_PLAYBACK_TIMEOUT_MS);
+              captureAcknowledgementWaitersRef.current.set(call.call_id, {
+                resolve: settle,
+                timeout,
+              });
+              try {
+                channel.send(
+                  JSON.stringify(
+                    photoCaptureAcknowledgementEvent(call.call_id),
+                  ),
+                );
+                logDiagnosticEvent(
+                  'shopping_photo_acknowledgement_requested',
+                  {
+                    callId: call.call_id,
+                  },
+                );
+              } catch (cause) {
+                clearTimeout(timeout);
+                captureAcknowledgementWaitersRef.current.delete(call.call_id);
+                reject(cause);
+              }
+            },
+          );
+          logDiagnosticEvent('shopping_photo_acknowledgement_finished', {
+            callId: call.call_id,
+            played: acknowledgementPlayed,
+            elapsedMs: Date.now() - acknowledgementStartedAt,
+          });
+        }
+
         currentStage = 'capture';
         captureStartedAt = input.needs_photo ? Date.now() : undefined;
         if (captureStartedAt !== undefined) {
@@ -186,7 +248,36 @@ export function useRealtimeShopping({
             deviceProfile,
           });
         }
-        const imageBase64 = input.needs_photo ? await capture() : undefined;
+        const captureAudioTracks =
+          input.needs_photo && deviceProfile === 'm02'
+            ? (localStreamRef.current?.getAudioTracks() ?? [])
+            : [];
+        const previousTrackStates = captureAudioTracks.map(
+          (track) => track.enabled,
+        );
+        if (captureAudioTracks.length > 0) {
+          captureAudioTracks.forEach((track) => {
+            track.enabled = false;
+          });
+          logDiagnosticEvent('shopping_capture_microphone_suspended', {
+            callId: call.call_id,
+            trackCount: captureAudioTracks.length,
+          });
+        }
+        let imageBase64: string | undefined;
+        try {
+          imageBase64 = input.needs_photo ? await capture() : undefined;
+        } finally {
+          captureAudioTracks.forEach((track, index) => {
+            track.enabled = previousTrackStates[index] ?? true;
+          });
+          if (captureAudioTracks.length > 0) {
+            logDiagnosticEvent('shopping_capture_microphone_restored', {
+              callId: call.call_id,
+              trackCount: captureAudioTracks.length,
+            });
+          }
+        }
         if (captureStartedAt !== undefined) {
           captureMs = Date.now() - captureStartedAt;
           logDiagnosticEvent('shopping_capture_completed', {
@@ -438,6 +529,13 @@ export function useRealtimeShopping({
             realtimeEvent.response_id,
           );
           if (responseTrace) {
+            if (
+              responseTrace.purpose === 'photo_capture_acknowledgement'
+            ) {
+              captureAcknowledgementWaitersRef.current
+                .get(responseTrace.callId)
+                ?.resolve(true);
+            }
             const trace = callTracesRef.current.get(responseTrace.callId);
             logDiagnosticEvent('realtime_output_audio_buffer_stopped', {
               callId: responseTrace.callId,

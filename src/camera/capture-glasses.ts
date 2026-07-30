@@ -93,6 +93,8 @@ export async function captureProductWithGlasses() {
     packetIntervalAverageMs: result.packetIntervalAverageMs,
     packetIntervalP95Ms: result.packetIntervalP95Ms,
     packetIntervalMaxMs: result.packetIntervalMaxMs,
+    audioHandoffToPhoneMs: result.audioHandoffToPhoneMs,
+    audioHandoffRestoreMs: result.audioHandoffRestoreMs,
     connectionMs: result.connectionMs,
     shutterMs: result.shutterMs,
     firstChunkMs: result.firstChunkMs,

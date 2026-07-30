@@ -43,6 +43,8 @@ export type GlassesThumbnailPhoto = {
   packetIntervalAverageMs?: number;
   packetIntervalP95Ms?: number;
   packetIntervalMaxMs?: number;
+  audioHandoffToPhoneMs?: number;
+  audioHandoffRestoreMs?: number;
   connectionMs: number;
   shutterMs: number;
   firstChunkMs: number;

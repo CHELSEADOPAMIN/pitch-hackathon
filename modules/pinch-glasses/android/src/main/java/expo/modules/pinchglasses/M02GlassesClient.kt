@@ -164,7 +164,11 @@ internal class M02GlassesClient(
     closeSession()
   }
 
-  suspend fun captureThumbnail(qualityLevel: Int): Map<String, Any?> =
+  suspend fun captureThumbnail(
+    qualityLevel: Int,
+    beforeTransfer: suspend () -> Unit = {},
+    afterTransfer: suspend () -> Unit = {},
+  ): Map<String, Any?> =
     operationMutex.withLock {
       checkBluetoothPermission()
       require(qualityLevel in 0..5) {
@@ -254,6 +258,19 @@ internal class M02GlassesClient(
           }
         }
 
+        var audioHandoffToPhoneMs: Long? = null
+        var audioHandoffRestoreMs: Long? = null
+        failureStage = "audio handoff"
+        val audioHandoffStartedAt = SystemClock.elapsedRealtime()
+        Log.i(logTag, "M02 thumbnail ready; releasing SCO before BLE transfer")
+        beforeTransfer()
+        audioHandoffToPhoneMs =
+          SystemClock.elapsedRealtime() - audioHandoffStartedAt
+        Log.i(
+          logTag,
+          "M02 SCO released before BLE transfer handoffMs=$audioHandoffToPhoneMs",
+        )
+
         failureStage = "transfer"
         emitStatus(
           "transferring",
@@ -269,65 +286,84 @@ internal class M02GlassesClient(
         var highPriorityRefreshRequested: Boolean? = null
         var firstSlowChunkMs: Long? = null
 
-        while (true) {
-          val chunkRequestedAt = SystemClock.elapsedRealtime()
-          ble.writeFast(
-            actionPictureThumbnail,
-            byteArrayOf(
-              1,
-              (expectedIndex and 0xFF).toByte(),
-              ((expectedIndex ushr 8) and 0xFF).toByte(),
-            ),
-          )
-          val frame = withTimeout(5_000) {
-            ble.awaitFrame(actionPictureThumbnail)
-          }
-          val packetReceivedAt = SystemClock.elapsedRealtime()
-          val chunkRoundTripMs = packetReceivedAt - chunkRequestedAt
-          previousPacketAt?.let {
-            packetIntervalsMs += packetReceivedAt - it
-          }
-          previousPacketAt = packetReceivedAt
-          if (frame.size < 11) {
-            error("The M02 returned an incomplete BLE photo packet.")
-          }
-          val total = littleEndian16(frame, 7)
-          val current = littleEndian16(frame, 9)
-          if (total !in 1..4_096) {
-            error("The M02 returned an invalid BLE photo packet count ($total).")
-          }
-          if (current != expectedIndex) {
-            error(
-              "The M02 returned BLE photo packet $current while packet $expectedIndex was expected.",
+        try {
+          while (true) {
+            val chunkRequestedAt = SystemClock.elapsedRealtime()
+            ble.writeFast(
+              actionPictureThumbnail,
+              byteArrayOf(
+                1,
+                (expectedIndex and 0xFF).toByte(),
+                ((expectedIndex ushr 8) and 0xFF).toByte(),
+              ),
             )
+            val frame = withTimeout(5_000) {
+              ble.awaitFrame(actionPictureThumbnail)
+            }
+            val packetReceivedAt = SystemClock.elapsedRealtime()
+            val chunkRoundTripMs = packetReceivedAt - chunkRequestedAt
+            previousPacketAt?.let {
+              packetIntervalsMs += packetReceivedAt - it
+            }
+            previousPacketAt = packetReceivedAt
+            if (frame.size < 11) {
+              error("The M02 returned an incomplete BLE photo packet.")
+            }
+            val total = littleEndian16(frame, 7)
+            val current = littleEndian16(frame, 9)
+            if (total !in 1..4_096) {
+              error("The M02 returned an invalid BLE photo packet count ($total).")
+            }
+            if (current != expectedIndex) {
+              error(
+                "The M02 returned BLE photo packet $current while packet $expectedIndex was expected.",
+              )
+            }
+            if (expectedTotal != null && expectedTotal != total) {
+              error("The M02 changed the BLE photo packet count during transfer.")
+            }
+            expectedTotal = total
+            if (firstChunkAt == null) {
+              firstChunkAt = packetReceivedAt
+            }
+            if (
+              highPriorityRefreshRequested == null &&
+              expectedIndex < slowThumbnailDetectionPackets &&
+              chunkRoundTripMs >= slowThumbnailChunkThresholdMs
+            ) {
+              firstSlowChunkMs = chunkRoundTripMs
+              highPriorityRefreshRequested = ble.requestConnectionPriority(
+                BluetoothGatt.CONNECTION_PRIORITY_HIGH,
+              )
+              Log.w(
+                logTag,
+                "M02 slow thumbnail chunk detected index=$expectedIndex " +
+                  "roundTripMs=$chunkRoundTripMs priorityRefreshRequested=" +
+                  highPriorityRefreshRequested,
+              )
+            }
+            imageBytes.write(frame, 11, frame.size - 11)
+            expectedIndex += 1
+            if (expectedIndex == total) {
+              break
+            }
           }
-          if (expectedTotal != null && expectedTotal != total) {
-            error("The M02 changed the BLE photo packet count during transfer.")
-          }
-          expectedTotal = total
-          if (firstChunkAt == null) {
-            firstChunkAt = packetReceivedAt
-          }
-          if (
-            highPriorityRefreshRequested == null &&
-            expectedIndex < slowThumbnailDetectionPackets &&
-            chunkRoundTripMs >= slowThumbnailChunkThresholdMs
-          ) {
-            firstSlowChunkMs = chunkRoundTripMs
-            highPriorityRefreshRequested = ble.requestConnectionPriority(
-              BluetoothGatt.CONNECTION_PRIORITY_HIGH,
-            )
-            Log.w(
+        } finally {
+          val transferFailureStage = failureStage
+          failureStage = "audio restore"
+          val restoreStartedAt = SystemClock.elapsedRealtime()
+          try {
+            afterTransfer()
+            audioHandoffRestoreMs =
+              SystemClock.elapsedRealtime() - restoreStartedAt
+            Log.i(
               logTag,
-              "M02 slow thumbnail chunk detected index=$expectedIndex " +
-                "roundTripMs=$chunkRoundTripMs priorityRefreshRequested=" +
-                highPriorityRefreshRequested,
+              "M02 SCO restored after BLE transfer restoreMs=$audioHandoffRestoreMs",
             )
-          }
-          imageBytes.write(frame, 11, frame.size - 11)
-          expectedIndex += 1
-          if (expectedIndex == total) {
-            break
+          } finally {
+            if (expectedTotal == null || expectedIndex != expectedTotal) {
+              failureStage = transferFailureStage
+            }
           }
         }
 
@@ -370,7 +406,9 @@ internal class M02GlassesClient(
             "transferMs=${finishedAt - transferStartedAt} " +
             "packetAvgMs=$packetIntervalAverageMs packetP95Ms=$packetIntervalP95Ms " +
             "packetMaxMs=$packetIntervalMaxMs priorityRefreshRequested=" +
-            "$highPriorityRefreshRequested firstSlowChunkMs=$firstSlowChunkMs",
+            "$highPriorityRefreshRequested firstSlowChunkMs=$firstSlowChunkMs " +
+            "audioHandoffToPhoneMs=$audioHandoffToPhoneMs " +
+            "audioHandoffRestoreMs=$audioHandoffRestoreMs",
         )
         emitStatus(
           "ready",
@@ -394,6 +432,8 @@ internal class M02GlassesClient(
           "packetIntervalAverageMs" to packetIntervalAverageMs,
           "packetIntervalP95Ms" to packetIntervalP95Ms,
           "packetIntervalMaxMs" to packetIntervalMaxMs,
+          "audioHandoffToPhoneMs" to audioHandoffToPhoneMs,
+          "audioHandoffRestoreMs" to audioHandoffRestoreMs,
           "connectionMs" to 0,
           "shutterMs" to (requireNotNull(thumbnailReadyAt) - commandStartedAt),
           "firstChunkMs" to (requireNotNull(firstChunkAt) - commandStartedAt),
