@@ -8,7 +8,7 @@ manage their basket by voice, receive an exact quote, and confirm payment
 through Pinch. The merchant immediately receives the paid order for exit or
 pickup verification.
 
-**[Download the Android APK](https://drive.google.com/file/d/1fzy8Tskd67ucy3uU0GUKSWjI-1-cCjeX/view?usp=sharing)**
+**[Download the Android APK](https://drive.google.com/file/d/1SjfZz5xVW-mm_YMFzcyglFbs0na_bbT8/view?usp=sharing)**
 
 ## The problem
 
